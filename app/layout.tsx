@@ -43,7 +43,7 @@ export default function RootLayout({
           >
             <ConvexClientProvider>
               <ThemeModeToggle />
-              {children}
+                {children}
             </ConvexClientProvider>
           </ThemeProvider>
         </body>
