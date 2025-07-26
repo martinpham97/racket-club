@@ -1,10 +1,10 @@
+import ConvexClientProvider from "@/components/ConvexClientProvider";
+import { NavBar } from "@/components/NavBar";
+import ThemeProvider from "@/components/ThemeProvider";
+import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
-import ConvexClientProvider from "@/components/ConvexClientProvider";
-import ThemeProvider from "@/components/ThemeProvider"
-import { ThemeModeToggle } from "@/components/ThemeModeToggle";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,9 +32,7 @@ export default function RootLayout({
   return (
     <ConvexAuthNextjsServerProvider>
       <html lang="en" suppressHydrationWarning>
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+        <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
           <ThemeProvider
             attribute="class"
             defaultTheme="system"
@@ -42,8 +40,14 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <ConvexClientProvider>
-              <ThemeModeToggle />
-                {children}
+              <div className="h-screen flex flex-col">
+                <header className="h-[var(--navbar-height)] sticky top-0 z-10 bg-background border-b-2 border-slate-200 dark:border-slate-800 flex flex-row justify-between items-center">
+                  <NavBar />
+                </header>
+                <main className="flex-1 overflow-auto flex justify-center items-center py-8">
+                  <div className="mx-auto my-auto">{children}</div>
+                </main>
+              </div>
             </ConvexClientProvider>
           </ThemeProvider>
         </body>
