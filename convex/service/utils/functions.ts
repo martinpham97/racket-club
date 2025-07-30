@@ -1,7 +1,7 @@
 import { customCtxAndArgs } from "convex-helpers/server/customFunctions";
 import { wrapDatabaseReader, wrapDatabaseWriter } from "convex-helpers/server/rowLevelSecurity";
 import { zCustomMutation, zCustomQuery } from "convex-helpers/server/zod";
-import { mutation, query } from "../_generated/server";
+import { mutation, query } from "../../_generated/server";
 import { rlsRules } from "./database";
 import { enforceAuthenticated } from "./validators/auth";
 

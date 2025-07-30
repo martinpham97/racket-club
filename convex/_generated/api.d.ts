@@ -17,11 +17,11 @@ import type * as schemas_pagination from "../schemas/pagination.js";
 import type * as service_users_database from "../service/users/database.js";
 import type * as service_users_functions from "../service/users/functions.js";
 import type * as service_users_schemas from "../service/users/schemas.js";
-import type * as utils_database from "../utils/database.js";
-import type * as utils_functions from "../utils/functions.js";
-import type * as utils_rateLimit from "../utils/rateLimit.js";
-import type * as utils_validators_auth from "../utils/validators/auth.js";
-import type * as utils_validators_rateLimit from "../utils/validators/rateLimit.js";
+import type * as service_utils_database from "../service/utils/database.js";
+import type * as service_utils_functions from "../service/utils/functions.js";
+import type * as service_utils_rateLimit from "../service/utils/rateLimit.js";
+import type * as service_utils_validators_auth from "../service/utils/validators/auth.js";
+import type * as service_utils_validators_rateLimit from "../service/utils/validators/rateLimit.js";
 
 import type {
   ApiFromModules,
@@ -47,11 +47,11 @@ declare const fullApi: ApiFromModules<{
   "service/users/database": typeof service_users_database;
   "service/users/functions": typeof service_users_functions;
   "service/users/schemas": typeof service_users_schemas;
-  "utils/database": typeof utils_database;
-  "utils/functions": typeof utils_functions;
-  "utils/rateLimit": typeof utils_rateLimit;
-  "utils/validators/auth": typeof utils_validators_auth;
-  "utils/validators/rateLimit": typeof utils_validators_rateLimit;
+  "service/utils/database": typeof service_utils_database;
+  "service/utils/functions": typeof service_utils_functions;
+  "service/utils/rateLimit": typeof service_utils_rateLimit;
+  "service/utils/validators/auth": typeof service_utils_validators_auth;
+  "service/utils/validators/rateLimit": typeof service_utils_validators_rateLimit;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

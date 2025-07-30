@@ -1,11 +1,6 @@
-import { paginatedInputSchema } from "../../schemas/pagination";
-import {
-  authenticatedMutationWithRLS,
-  authenticatedQueryWithRLS,
-  publicQueryWithRLS,
-} from "../../utils/functions";
-import { enforceOwnershipOrAdmin } from "../../utils/validators/auth";
-import { enforceRateLimit } from "../../utils/validators/rateLimit";
+import { authenticatedMutationWithRLS, publicQueryWithRLS } from "../utils/functions";
+import { enforceOwnershipOrAdmin } from "../utils/validators/auth";
+import { enforceRateLimit } from "../utils/validators/rateLimit";
 import {
   createUserProfile as dtoCreateUserProfile,
   getCurrentUser as dtoGetCurrentUser,
@@ -16,15 +11,6 @@ import { userProfileInputSchema } from "./schemas";
 export const getCurrentUser = publicQueryWithRLS()({
   args: {},
   handler: async (ctx) => await dtoGetCurrentUser(ctx),
-});
-
-export const getUserProfiles = authenticatedQueryWithRLS()({
-  args: paginatedInputSchema,
-  handler: async (ctx, args) =>
-    await ctx.db.query("userProfiles").paginate({
-      numItems: args.numItems,
-      cursor: args.cursor || null,
-    }),
 });
 
 export const createUserProfile = authenticatedMutationWithRLS({ profileRequired: false })({

@@ -1,8 +1,8 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { Rules } from "convex-helpers/server/rowLevelSecurity";
-import { DataModel } from "../_generated/dataModel";
-import { QueryCtx } from "../_generated/server";
-import { getCurrentUser } from "../service/users/database";
+import { DataModel } from "../../_generated/dataModel";
+import { QueryCtx } from "../../_generated/server";
+import { getCurrentUser } from "../../service/users/database";
 
 /**
  * Row-level security rules

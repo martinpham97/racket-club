@@ -41,11 +41,9 @@ export const createUserProfile = async (
   input: UserProfileInput,
 ): Promise<Id<"userProfiles">> => {
   const existingProfile = await getProfileByUserId(ctx, input.userId);
-
   if (existingProfile) {
     return existingProfile._id;
   }
-
   const profile = await ctx.db.insert("userProfiles", {
     ...input,
     isAdmin: false,

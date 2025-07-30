@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import z from "zod";
-import { authenticatedMutationWithRLS, publicQueryWithRLS } from "./utils/functions";
+import { authenticatedMutationWithRLS, publicQueryWithRLS } from "./service/utils/functions";
 
 // Write your Convex functions in any file inside this directory (`convex`).
 // See https://docs.convex.dev/functions for more.

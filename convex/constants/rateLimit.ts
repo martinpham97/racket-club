@@ -8,7 +8,7 @@ export const LIMIT_CONFIG = {
   // Profile update limits
   profileUpdate: {
     kind: "fixed window",
-    period: SECOND,
+    period: DAY,
     rate: 5,
     capacity: 5,
   },
