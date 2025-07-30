@@ -1,7 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { userTables } from "./schemas/users";
+import { userTables } from "./service/users/schemas";
 
 // The schema is normally optional, but Convex Auth
 // requires indexes defined on `authTables`.

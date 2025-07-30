@@ -4,8 +4,14 @@ import z from "zod";
 
 export const userProfileSchema = z.object({
   userId: zid("users"),
-  firstName: z.string().nonempty("First name is required"),
-  lastName: z.string().nonempty("Last name is required"),
+  firstName: z
+    .string()
+    .nonempty("First name is required.")
+    .max(64, "Must be 64 characters or fewer."),
+  lastName: z
+    .string()
+    .nonempty("Last name is required.")
+    .max(64, "Must be 64 characters or fewer."),
   gender: z.enum(["M", "F"]).optional(),
   dob: z.number().optional(),
   skillLevel: z.enum(["A", "B", "C", "D", "E", "OPEN"]).optional(),
@@ -14,8 +20,7 @@ export const userProfileSchema = z.object({
   isAdmin: z.boolean(),
 });
 
-export const userProfileInputSchema = userProfileSchema.omit({ userId: true, isAdmin: true });
-
+export const userProfileInputSchema = userProfileSchema.omit({ isAdmin: true });
 export type UserProfileInput = z.infer<typeof userProfileInputSchema>;
 
 export const userProfileTable = defineTable(zodToConvex(userProfileSchema))

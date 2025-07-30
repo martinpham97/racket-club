@@ -1,6 +1,7 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardHeader } from "@heroui/card";
+import { Divider } from "@heroui/divider";
 
 export interface CenterCardProps {
   title: string;
@@ -11,16 +12,17 @@ export interface CenterCardProps {
 
 export default function CenterCard({ title, description, children }: CenterCardProps) {
   return (
-    <div className="flex flex-col gap-8 items-center">
-      <Card className="w-full max-h-full">
-        {(title || description) && (
-          <CardHeader className="text-center">
-            {title && <CardTitle>{title}</CardTitle>}
-            {description && <CardDescription>{description}</CardDescription>}
+    <Card shadow="md" className="items-center p-2">
+      {(title || description) && (
+        <>
+          <CardHeader className="flex flex-col">
+            {title && <p className="text-md">{title}</p>}
+            {description && <p className="text-small text-default-500">{description}</p>}
           </CardHeader>
-        )}
-        <CardContent>{children}</CardContent>
-      </Card>
-    </div>
+          <Divider className="my-2" />
+        </>
+      )}
+      <CardBody>{children}</CardBody>
+    </Card>
   );
 }
