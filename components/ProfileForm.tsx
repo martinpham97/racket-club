@@ -78,13 +78,13 @@ export function ProfileForm({ formId, defaultValues, onSubmit }: ProfileFormProp
                 className="w-full"
                 label="Gender"
                 onChange={() => field.onChange(field.value || undefined)}
-                selectedKeys={field.value ? [field.value] : []}
+                selectedKeys={field.value ? [field.value] : undefined}
               >
                 {[
-                  { key: "Male", value: "M" },
-                  { key: "Female", value: "F" },
+                  { key: "M", label: "Male" },
+                  { key: "F", label: "Female" },
                 ].map((gender) => (
-                  <SelectItem key={gender.value}>{gender.key}</SelectItem>
+                  <SelectItem key={gender.key}>{gender.label}</SelectItem>
                 ))}
               </Select>
             )}
@@ -124,7 +124,7 @@ export function ProfileForm({ formId, defaultValues, onSubmit }: ProfileFormProp
                 className="w-full"
                 label="Skill Level"
                 onChange={() => field.onChange(field.value || undefined)}
-                selectedKeys={field.value ? [field.value] : []}
+                selectedKeys={field.value ? [field.value] : undefined}
               >
                 {["A", "B", "C", "D", "E", "OPEN"].map((level) => (
                   <SelectItem key={level}>{level}</SelectItem>
@@ -142,7 +142,7 @@ export function ProfileForm({ formId, defaultValues, onSubmit }: ProfileFormProp
                 className="w-full"
                 label="Preferred Play Style"
                 onChange={() => field.onChange(field.value || undefined)}
-                selectedKeys={field.value ? [field.value] : []}
+                selectedKeys={field.value ? [field.value] : undefined}
               >
                 {["MS", "MD", "WS", "WD", "XD"].map((style) => (
                   <SelectItem key={style}>{style}</SelectItem>
