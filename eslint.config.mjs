@@ -1,7 +1,7 @@
 import js from "@eslint/js";
-import tseslint from "typescript-eslint";
 import next from "eslint-config-next";
 import prettier from "eslint-config-prettier";
+import tseslint from "typescript-eslint";
 
 /** @type {import("eslint").Linter.Config[]} */
 export default [
