@@ -12,7 +12,7 @@ export interface CenterCardProps {
 
 export default function CenterCard({ title, description, children }: CenterCardProps) {
   return (
-    <Card shadow="md" className="items-center p-2">
+    <Card shadow="md" className="items-center p-2 m-6 w-full md:max-w-xl">
       {(title || description) && (
         <>
           <CardHeader className="flex flex-col">

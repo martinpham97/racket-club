@@ -48,7 +48,14 @@ export function Header() {
   }
 
   return (
-    <Navbar onMenuOpenChange={setIsMenuOpen} isBordered isBlurred={false} shouldHideOnScroll>
+    <Navbar
+      onMenuOpenChange={setIsMenuOpen}
+      isBordered
+      isBlurred={false}
+      classNames={{
+        wrapper: "px-4",
+      }}
+    >
       <NavbarContent>
         <NavbarMenuToggle
           aria-label={isMenuOpen ? "Close menu" : "Open menu"}

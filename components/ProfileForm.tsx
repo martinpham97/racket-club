@@ -53,8 +53,9 @@ export function ProfileForm({ formId, defaultValues, onSubmit }: ProfileFormProp
       onSubmit={form.handleSubmit(onSubmit)}
       validationBehavior="aria"
       validationErrors={mapErrors(form.formState.errors)}
+      className="items-stretch"
     >
-      <div className="space-y-4 sm:min-w-xl">
+      <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
           <Controller
             control={form.control}

@@ -22,7 +22,7 @@ export default function SignInPage() {
       title="Login to your account"
       description="Please login to access restricted features"
     >
-      <div className="flex flex-col gap-4 sm:min-w-lg">
+      <div className="flex flex-col gap-4 md:min-w-lg sm:min-w-sm">
         <Button className="w-full" color="primary" onPress={() => void handleSignIn("facebook")}>
           <FaFacebookF size={20} />
           Login with Facebook

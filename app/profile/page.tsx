@@ -49,7 +49,7 @@ export default function ProfilePage() {
           <ProfileForm
             formId="profile-form"
             onSubmit={userHasProfile ? onModifyProfile : onCreateProfile}
-            defaultValues={currentUser?.profile}
+            defaultValues={currentUser?.profile || { userId: currentUser._id }}
           />
           <Button color="primary" type="submit" form="profile-form">
             {userHasProfile ? "Update profile" : "Create Profile"}
