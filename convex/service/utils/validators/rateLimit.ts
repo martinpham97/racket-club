@@ -1,10 +1,10 @@
+import { RATE_LIMIT_REACHED_ERROR_TEMPLATE } from "@/convex/constants/errors";
+import { LIMIT_CONFIG } from "@/convex/constants/rateLimit";
+import { rateLimiter } from "@/convex/service/utils/rateLimit";
 import { RunMutationCtx } from "@convex-dev/rate-limiter";
 import { ConvexError } from "convex/values";
 import { formatDistance } from "date-fns";
 import template from "string-template";
-import { RATE_LIMIT_REACHED_ERROR_TEMPLATE } from "../../../constants/errors";
-import { LIMIT_CONFIG } from "../../../constants/rateLimit";
-import { rateLimiter } from "../rateLimit";
 
 export async function enforceRateLimit<
   Ctx extends RunMutationCtx,

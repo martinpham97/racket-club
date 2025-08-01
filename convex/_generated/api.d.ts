@@ -14,6 +14,7 @@ import type * as constants_rateLimit from "../constants/rateLimit.js";
 import type * as http from "../http.js";
 import type * as myFunctions from "../myFunctions.js";
 import type * as schemas_pagination from "../schemas/pagination.js";
+import type * as service_club_schemas from "../service/club/schemas.js";
 import type * as service_users_database from "../service/users/database.js";
 import type * as service_users_functions from "../service/users/functions.js";
 import type * as service_users_schemas from "../service/users/schemas.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   myFunctions: typeof myFunctions;
   "schemas/pagination": typeof schemas_pagination;
+  "service/club/schemas": typeof service_club_schemas;
   "service/users/database": typeof service_users_database;
   "service/users/functions": typeof service_users_functions;
   "service/users/schemas": typeof service_users_schemas;

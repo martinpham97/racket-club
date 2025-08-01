@@ -1,7 +1,7 @@
+import { mutation, query } from "@/convex/_generated/server";
 import { customCtxAndArgs } from "convex-helpers/server/customFunctions";
 import { wrapDatabaseReader, wrapDatabaseWriter } from "convex-helpers/server/rowLevelSecurity";
 import { zCustomMutation, zCustomQuery } from "convex-helpers/server/zod";
-import { mutation, query } from "../../_generated/server";
 import { rlsRules } from "./database";
 import { enforceAuthenticated } from "./validators/auth";
 
@@ -35,7 +35,10 @@ export function authenticatedQueryWithRLS(options: AuthenticationOptions = {}) {
         const currentUser = await enforceAuthenticated(ctx, { profileRequired });
         return {
           args: {},
-          ctx: { db: wrapDatabaseReader(ctx, ctx.db, await rlsRules(ctx)), currentUser },
+          ctx: {
+            db: wrapDatabaseReader(ctx, ctx.db, await rlsRules(ctx, currentUser)),
+            currentUser,
+          },
         };
       },
     }),
@@ -54,7 +57,7 @@ export function authenticatedMutationWithRLS(options: AuthenticationOptions = {}
         return {
           args: {},
           ctx: {
-            db: wrapDatabaseWriter(ctx, ctx.db, await rlsRules(ctx)),
+            db: wrapDatabaseWriter(ctx, ctx.db, await rlsRules(ctx, currentUser)),
             currentUser,
           },
         };

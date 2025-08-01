@@ -1,20 +1,16 @@
+import { Id } from "@/convex/_generated/dataModel";
+import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
+import {
+  AUTH_PROVIDER_NO_EMAIL_ERROR,
+  USER_PROFILE_ALREADY_EXISTS_ERROR,
+  USER_PROFILE_REQUIRED_ERROR,
+} from "@/convex/constants/errors";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getOneFrom } from "convex-helpers/server/relationships";
-import { DocumentByName } from "convex/server";
 import { ConvexError } from "convex/values";
-import { DataModel, Id } from "../../_generated/dataModel";
-import { MutationCtx, QueryCtx } from "../../_generated/server";
-import { USER_PROFILE_REQUIRED_ERROR } from "../../constants/errors";
-import { UserProfileInput } from "./schemas";
+import { CurrentUser, User, UserProfile, UserProfileInput, UserProfilePartial } from "./schemas";
 
-type UserDoc = DocumentByName<DataModel, "users">;
-type UserProfileDoc = DocumentByName<DataModel, "userProfiles"> | null;
-
-export interface CurrentUser extends UserDoc {
-  profile: UserProfileDoc;
-}
-
-export const findUserByEmail = async (ctx: QueryCtx, email: string): Promise<UserDoc | null> => {
+export const findUserByEmail = async (ctx: QueryCtx, email: string): Promise<User | null> => {
   return await getOneFrom(ctx.db, "users", "email", email);
 };
 
@@ -29,10 +25,33 @@ export const getCurrentUser = async (ctx: QueryCtx): Promise<CurrentUser | null>
   return { ...user, profile };
 };
 
+export async function createOrUpdateUser(
+  ctx: MutationCtx,
+  args: {
+    existingUserId?: Id<"users"> | null;
+    email?: string;
+  },
+) {
+  if (!!args.existingUserId) {
+    return args.existingUserId;
+  }
+
+  if (!args.email) {
+    throw new ConvexError(AUTH_PROVIDER_NO_EMAIL_ERROR);
+  }
+
+  const existingUser = await findUserByEmail(ctx, args.email);
+  if (existingUser) return existingUser._id;
+
+  return ctx.db.insert("users", {
+    email: args.email,
+  });
+}
+
 export const getProfileByUserId = async (
   ctx: QueryCtx,
   userId: Id<"users">,
-): Promise<UserProfileDoc | null> => {
+): Promise<UserProfile | null> => {
   return await getOneFrom(ctx.db, "userProfiles", "userId", userId);
 };
 
@@ -42,7 +61,7 @@ export const createUserProfile = async (
 ): Promise<Id<"userProfiles">> => {
   const existingProfile = await getProfileByUserId(ctx, input.userId);
   if (existingProfile) {
-    return existingProfile._id;
+    throw new ConvexError(USER_PROFILE_ALREADY_EXISTS_ERROR);
   }
   const profile = await ctx.db.insert("userProfiles", {
     ...input,
@@ -53,8 +72,8 @@ export const createUserProfile = async (
 
 export const updateUserProfile = async (
   ctx: MutationCtx,
-  input: UserProfileInput,
-): Promise<UserProfileDoc> => {
+  input: UserProfilePartial,
+): Promise<UserProfile> => {
   const profile = await getProfileByUserId(ctx, input.userId);
   if (!profile) {
     throw new ConvexError(USER_PROFILE_REQUIRED_ERROR);

@@ -1,5 +1,6 @@
+import { DataModel } from "@/convex/_generated/dataModel";
 import { zid, zodToConvex } from "convex-helpers/server/zod";
-import { defineTable } from "convex/server";
+import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
 export const userProfileSchema = z.object({
@@ -23,9 +24,19 @@ export const userProfileSchema = z.object({
 export const userProfileInputSchema = userProfileSchema.omit({ isAdmin: true });
 export type UserProfileInput = z.infer<typeof userProfileInputSchema>;
 
+export const userProfilePartialSchema = userProfileInputSchema.partial().required({ userId: true });
+export type UserProfilePartial = z.infer<typeof userProfilePartialSchema>;
+
 export const userProfileTable = defineTable(zodToConvex(userProfileSchema))
   .index("userId", ["userId"])
   .index("isAdmin", ["isAdmin"]);
+
+export type User = DocumentByName<DataModel, "users">;
+export type UserProfile = DocumentByName<DataModel, "userProfiles">;
+
+export interface CurrentUser extends User {
+  profile: UserProfile | null;
+}
 
 export const userTables = {
   userProfiles: userProfileTable,

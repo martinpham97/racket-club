@@ -1,12 +1,12 @@
-import { authenticatedMutationWithRLS, publicQueryWithRLS } from "../utils/functions";
-import { enforceOwnershipOrAdmin } from "../utils/validators/auth";
-import { enforceRateLimit } from "../utils/validators/rateLimit";
+import { authenticatedMutationWithRLS, publicQueryWithRLS } from "@/convex/service/utils/functions";
+import { enforceOwnershipOrAdmin } from "@/convex/service/utils/validators/auth";
+import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
 import {
   createUserProfile as dtoCreateUserProfile,
   getCurrentUser as dtoGetCurrentUser,
   updateUserProfile as dtoUpdateUserProfile,
 } from "./database";
-import { userProfileInputSchema } from "./schemas";
+import { userProfileInputSchema, userProfilePartialSchema } from "./schemas";
 
 export const getCurrentUser = publicQueryWithRLS()({
   args: {},
@@ -21,7 +21,7 @@ export const createUserProfile = authenticatedMutationWithRLS({ profileRequired:
 });
 
 export const updateUserProfile = authenticatedMutationWithRLS()({
-  args: userProfileInputSchema,
+  args: userProfilePartialSchema,
   handler: async (ctx, args) => {
     const { currentUser } = ctx;
     await enforceRateLimit(ctx, "profileUpdate", currentUser._id);
