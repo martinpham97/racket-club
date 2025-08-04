@@ -1,45 +1,20 @@
 import { api } from "@/convex/_generated/api";
-import { Id } from "@/convex/_generated/dataModel";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   USER_PROFILE_ALREADY_EXISTS_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
-import { createTestProfile } from "@/test-utils/samples/users";
-import { convexTest, TestConvex } from "convex-test";
-import { WithoutSystemFields } from "convex/server";
+import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
+import { convexTest } from "convex-test";
 import { describe, expect, it, vi } from "vitest";
-import { UserProfile } from "../schemas";
 
 vi.mock("@/convex/service/utils/validators/rateLimit", () => ({
   enforceRateLimit: vi.fn(),
 }));
 
-class TestHelpers {
-  constructor(private t: TestConvex<typeof schema>) {}
-
-  async createUser(email = "test@example.com") {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("users", { email });
-    });
-  }
-
-  async createProfile(profile: WithoutSystemFields<UserProfile>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("userProfiles", {
-        ...profile,
-      });
-    });
-  }
-
-  async getProfile(profileId: Id<"userProfiles">) {
-    return await this.t.run(async (ctx) => ctx.db.get(profileId));
-  }
-}
-
 describe("User Functions", () => {
   const t = convexTest(schema);
-  const helpers = new TestHelpers(t);
+  const helpers = new UserTestHelpers(t);
 
   describe("getCurrentUser", () => {
     it("returns null when not authenticated", async () => {
@@ -48,9 +23,9 @@ describe("User Functions", () => {
     });
 
     it("returns user with profile when authenticated", async () => {
-      const userId = await helpers.createUser();
+      const userId = await helpers.insertUser();
       const profile = createTestProfile(userId);
-      await helpers.createProfile(profile);
+      await helpers.insertProfile(profile);
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.users.functions.getCurrentUser, {});
@@ -62,7 +37,7 @@ describe("User Functions", () => {
 
   describe("createUserProfile", () => {
     it("creates user profile", async () => {
-      const userId = await helpers.createUser();
+      const userId = await helpers.insertUser();
       const profile = createTestProfile(userId);
       const args = { userId, firstName: profile.firstName, lastName: profile.lastName };
       const asUser = t.withIdentity({ subject: userId });
@@ -75,15 +50,15 @@ describe("User Functions", () => {
     });
 
     it("allows admin to create profile for any user", async () => {
-      const adminId = await helpers.createUser("admin@example.com");
-      await helpers.createProfile({
+      const adminId = await helpers.insertUser("admin@example.com");
+      await helpers.insertProfile({
         firstName: "Admin",
         lastName: "User",
         isAdmin: true,
         userId: adminId,
       });
 
-      const targetUserId = await helpers.createUser("target@example.com");
+      const targetUserId = await helpers.insertUser("target@example.com");
 
       const profile = createTestProfile(targetUserId);
       const args = {
@@ -101,9 +76,9 @@ describe("User Functions", () => {
     });
 
     it("throws when profile already exists", async () => {
-      const userId = await helpers.createUser();
+      const userId = await helpers.insertUser();
       const profile = createTestProfile(userId);
-      await helpers.createProfile(profile);
+      await helpers.insertProfile(profile);
 
       const args = { userId, firstName: "New", lastName: "Name" };
       const asUser = t.withIdentity({ subject: userId });
@@ -114,10 +89,10 @@ describe("User Functions", () => {
     });
 
     it("throws when trying to create profile for another user", async () => {
-      const userId = await helpers.createUser("test@example.com");
-      const targetUserId = await helpers.createUser("target@example.com");
+      const userId = await helpers.insertUser("test@example.com");
+      const targetUserId = await helpers.insertUser("target@example.com");
       const profile = createTestProfile(userId);
-      await helpers.createProfile(profile);
+      await helpers.insertProfile(profile);
 
       const args = { userId: targetUserId, firstName: "New", lastName: "Name" };
       const asUser = t.withIdentity({ subject: userId });
@@ -130,9 +105,9 @@ describe("User Functions", () => {
 
   describe("updateUserProfile", () => {
     it("updates user profile", async () => {
-      const userId = await helpers.createUser();
+      const userId = await helpers.insertUser();
       const profile = createTestProfile(userId);
-      const profileId = await helpers.createProfile(profile);
+      const profileId = await helpers.insertProfile(profile);
 
       const args = { userId, firstName: "Updated" };
       const asUser = t.withIdentity({ subject: userId });
@@ -144,16 +119,16 @@ describe("User Functions", () => {
     });
 
     it("allows admin to update any profile", async () => {
-      const adminId = await helpers.createUser("admin@example.com");
-      await helpers.createProfile({
+      const adminId = await helpers.insertUser("admin@example.com");
+      await helpers.insertProfile({
         firstName: "Admin",
         lastName: "User",
         isAdmin: true,
         userId: adminId,
       });
 
-      const targetUserId = await helpers.createUser("target@example.com");
-      const targetProfileId = await helpers.createProfile({
+      const targetUserId = await helpers.insertUser("target@example.com");
+      const targetProfileId = await helpers.insertProfile({
         firstName: "Target",
         lastName: "User",
         isAdmin: false,
@@ -170,16 +145,16 @@ describe("User Functions", () => {
     });
 
     it("rejects when non-admin user tries to modify another user", async () => {
-      const userId = await helpers.createUser("user@example.com");
-      await helpers.createProfile({
+      const userId = await helpers.insertUser("user@example.com");
+      await helpers.insertProfile({
         firstName: "User",
         lastName: "One",
         isAdmin: false,
         userId,
       });
 
-      const targetUserId = await helpers.createUser("target@example.com");
-      await helpers.createProfile({
+      const targetUserId = await helpers.insertUser("target@example.com");
+      await helpers.insertProfile({
         firstName: "Target",
         lastName: "User",
         isAdmin: false,

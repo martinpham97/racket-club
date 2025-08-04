@@ -1,20 +1,34 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
-import {
-  AUTH_PROVIDER_NO_EMAIL_ERROR,
-  USER_PROFILE_ALREADY_EXISTS_ERROR,
-  USER_PROFILE_REQUIRED_ERROR,
-} from "@/convex/constants/errors";
+import { AUTH_PROVIDER_NO_EMAIL_ERROR } from "@/convex/constants/errors";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { getOneFrom } from "convex-helpers/server/relationships";
 import { ConvexError } from "convex/values";
-import { CurrentUser, User, UserProfile, UserProfileInput, UserProfilePartial } from "./schemas";
+import {
+  User,
+  UserDetails,
+  UserProfile,
+  UserProfileCreateInput,
+  UserProfileUpdateInput,
+} from "./schemas";
 
+/**
+ * Finds a user by their email address.
+ * @param ctx Query context
+ * @param email User's email address
+ * @returns User object if found, null otherwise
+ */
 export const findUserByEmail = async (ctx: QueryCtx, email: string): Promise<User | null> => {
   return await getOneFrom(ctx.db, "users", "email", email);
 };
 
-export const getCurrentUser = async (ctx: QueryCtx): Promise<CurrentUser | null> => {
+/**
+ * Gets the current authenticated user with their profile.
+ * If the user has not created a profile, only user details are returned.
+ * @param ctx Query context
+ * @returns User details with profile if authenticated, null otherwise
+ */
+export const getCurrentUser = async (ctx: QueryCtx): Promise<UserDetails | null> => {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
 
@@ -25,14 +39,25 @@ export const getCurrentUser = async (ctx: QueryCtx): Promise<CurrentUser | null>
   return { ...user, profile };
 };
 
-export async function createOrUpdateUser(
+/**
+ * Gets an existing user or creates a new one if it doesn't exist.
+ * This function is called by Convex Auth to link existing user.
+ * See: https://labs.convex.dev/auth/advanced#controlling-user-creation-and-account-linking-behavior.
+ * @param ctx Mutation context
+ * @param args Arguments containing existing user ID or email
+ * @param args.existingUserId Existing user ID if available
+ * @param args.email Email address for user lookup/creation
+ * @returns User ID
+ * @throws ConvexError when no email is provided
+ */
+export const getOrCreateUser = async (
   ctx: MutationCtx,
   args: {
     existingUserId?: Id<"users"> | null;
     email?: string;
   },
-) {
-  if (!!args.existingUserId) {
+) => {
+  if (args.existingUserId) {
     return args.existingUserId;
   }
 
@@ -41,13 +66,21 @@ export async function createOrUpdateUser(
   }
 
   const existingUser = await findUserByEmail(ctx, args.email);
-  if (existingUser) return existingUser._id;
+  if (existingUser) {
+    return existingUser._id;
+  }
 
   return ctx.db.insert("users", {
     email: args.email,
   });
-}
+};
 
+/**
+ * Gets a user profile by user ID.
+ * @param ctx Query context
+ * @param userId User ID to lookup profile for
+ * @returns User profile if found, null otherwise
+ */
 export const getProfileByUserId = async (
   ctx: QueryCtx,
   userId: Id<"users">,
@@ -55,14 +88,16 @@ export const getProfileByUserId = async (
   return await getOneFrom(ctx.db, "userProfiles", "userId", userId);
 };
 
+/**
+ * Creates a non-admin new user profile.
+ * @param ctx Mutation context
+ * @param input User profile creation data
+ * @returns ID of the created user profile
+ */
 export const createUserProfile = async (
   ctx: MutationCtx,
-  input: UserProfileInput,
+  input: UserProfileCreateInput,
 ): Promise<Id<"userProfiles">> => {
-  const existingProfile = await getProfileByUserId(ctx, input.userId);
-  if (existingProfile) {
-    throw new ConvexError(USER_PROFILE_ALREADY_EXISTS_ERROR);
-  }
   const profile = await ctx.db.insert("userProfiles", {
     ...input,
     isAdmin: false,
@@ -70,16 +105,18 @@ export const createUserProfile = async (
   return profile;
 };
 
+/**
+ * Updates an existing user profile.
+ * @param ctx Mutation context
+ * @param profileId Profile ID
+ * @param input User profile update data
+ */
 export const updateUserProfile = async (
   ctx: MutationCtx,
-  input: UserProfilePartial,
-): Promise<UserProfile> => {
-  const profile = await getProfileByUserId(ctx, input.userId);
-  if (!profile) {
-    throw new ConvexError(USER_PROFILE_REQUIRED_ERROR);
-  }
-  await ctx.db.patch(profile._id, {
+  profileId: Id<"userProfiles">,
+  input: UserProfileUpdateInput,
+): Promise<void> => {
+  return await ctx.db.patch(profileId, {
     ...input,
   });
-  return profile;
 };

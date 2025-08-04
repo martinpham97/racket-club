@@ -12,3 +12,15 @@ export const USER_PROFILE_ALREADY_EXISTS_ERROR = "Profile already exists.";
 
 export const RATE_LIMIT_REACHED_ERROR_TEMPLATE =
   "Looks like you're sending too many requests. Try again after {retryAfter}.";
+
+export const CLUB_NOT_FOUND_ERROR = "This club does not exist.";
+
+export const CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR = "You are already a member of this club.";
+
+export const CLUB_MEMBERSHIP_REQUIRED_ERROR =
+  "You must be a member of this club to perform this action.";
+
+export const CLUB_FULL_ERROR = "You cannot join this club. This club has reached its max capacity.";
+
+export const CLUB_PUBLIC_UNAPPROVED_ERROR =
+  "You cannot join this club. This public club has not yet been approved.";

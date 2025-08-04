@@ -1,91 +1,74 @@
-import {
-  AUTH_ACCESS_DENIED_ERROR,
-  AUTH_UNAUTHENTICATED_ERROR,
-  USER_PROFILE_REQUIRED_ERROR,
-} from "@/convex/constants/errors";
-import { getCurrentUser } from "@/convex/service/users/database";
-import { createTestUserRecord } from "@/test-utils/samples/users";
-import { ConvexError } from "convex/values";
-import { describe, expect, it, vi } from "vitest";
-import { enforceAuthenticated, enforceOwnershipOrAdmin } from "../auth";
+import { Id } from "@/convex/_generated/dataModel";
+import { UserDetails } from "@/convex/service/users/schemas";
+import { describe, expect, it } from "vitest";
+import { isOwnerOrSystemAdmin } from "../auth";
 
-vi.mock("@/convex/service/users/database");
+describe("isOwnerOrSystemAdmin", () => {
+  const userId = "user123" as Id<"users">;
+  const otherUserId = "user456" as Id<"users">;
 
-describe("auth validators", () => {
-  const user = createTestUserRecord();
-  const userNoProfile = createTestUserRecord({ profile: null });
-  const adminUser = createTestUserRecord({
-    profile: { isAdmin: true },
+  it("returns true when user is the owner", () => {
+    const currentUser: UserDetails = {
+      _id: userId,
+      _creationTime: Date.now(),
+      email: "test@example.com",
+      profile: {
+        _id: "profile123" as Id<"userProfiles">,
+        _creationTime: Date.now(),
+        userId,
+        firstName: "John",
+        lastName: "Doe",
+        isAdmin: false,
+      },
+    };
+
+    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(true);
   });
 
-  describe("enforceOwnershipOrAdmin", () => {
-    it("allows admin to access any user", () => {
-      expect(() => enforceOwnershipOrAdmin(adminUser, user._id)).not.toThrow();
-      expect(() => enforceOwnershipOrAdmin(adminUser, userNoProfile._id)).not.toThrow();
-    });
+  it("returns true when user is an admin", () => {
+    const currentUser: UserDetails = {
+      _id: otherUserId,
+      _creationTime: Date.now(),
+      email: "admin@example.com",
+      profile: {
+        _id: "profile456" as Id<"userProfiles">,
+        _creationTime: Date.now(),
+        userId: otherUserId,
+        firstName: "Admin",
+        lastName: "User",
+        isAdmin: true,
+      },
+    };
 
-    it("allows user to access their own data", () => {
-      expect(() => enforceOwnershipOrAdmin(user, user._id)).not.toThrow();
-      expect(() => enforceOwnershipOrAdmin(userNoProfile, userNoProfile._id)).not.toThrow();
-    });
-
-    it("throws access denied for non-admin accessing other user", () => {
-      expect(() => enforceOwnershipOrAdmin(user, adminUser._id)).toThrow(
-        new ConvexError(AUTH_ACCESS_DENIED_ERROR),
-      );
-      expect(() => enforceOwnershipOrAdmin(user, userNoProfile._id)).toThrow(
-        new ConvexError(AUTH_ACCESS_DENIED_ERROR),
-      );
-    });
-
-    it("throws access denied for no-profile user accessing other user", () => {
-      expect(() => enforceOwnershipOrAdmin(userNoProfile, user._id)).toThrow(
-        new ConvexError(AUTH_ACCESS_DENIED_ERROR),
-      );
-    });
+    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(true);
   });
 
-  describe("enforceAuthenticated", () => {
-    const mockCtx = {} as any;
+  it("returns false when user is neither owner nor admin", () => {
+    const currentUser: UserDetails = {
+      _id: otherUserId,
+      _creationTime: Date.now(),
+      email: "regular@example.com",
+      profile: {
+        _id: "profile456" as Id<"userProfiles">,
+        _creationTime: Date.now(),
+        userId: otherUserId,
+        firstName: "Regular",
+        lastName: "User",
+        isAdmin: false,
+      },
+    };
 
-    it("returns user when authenticated", async () => {
-      vi.mocked(getCurrentUser).mockResolvedValue(user);
+    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(false);
+  });
 
-      const result = await enforceAuthenticated(mockCtx);
+  it("returns false when user has no profile", () => {
+    const currentUser: UserDetails = {
+      _id: otherUserId,
+      _creationTime: Date.now(),
+      email: "noprofile@example.com",
+      profile: null,
+    };
 
-      expect(result).toBe(user);
-    });
-
-    it("throws unauthenticated error when user is null", async () => {
-      vi.mocked(getCurrentUser).mockResolvedValue(null);
-
-      await expect(enforceAuthenticated(mockCtx)).rejects.toThrow(
-        new ConvexError(AUTH_UNAUTHENTICATED_ERROR),
-      );
-    });
-
-    it("allows user without profile when profile not required", async () => {
-      vi.mocked(getCurrentUser).mockResolvedValue(userNoProfile);
-
-      const result = await enforceAuthenticated(mockCtx);
-
-      expect(result).toBe(userNoProfile);
-    });
-
-    it("throws profile required error when profile required but missing", async () => {
-      vi.mocked(getCurrentUser).mockResolvedValue(userNoProfile);
-
-      await expect(enforceAuthenticated(mockCtx, { profileRequired: true })).rejects.toThrow(
-        new ConvexError(USER_PROFILE_REQUIRED_ERROR),
-      );
-    });
-
-    it("allows user with profile when profile required", async () => {
-      vi.mocked(getCurrentUser).mockResolvedValue(user);
-
-      const result = await enforceAuthenticated(mockCtx, { profileRequired: true });
-
-      expect(result).toBe(user);
-    });
+    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(false);
   });
 });

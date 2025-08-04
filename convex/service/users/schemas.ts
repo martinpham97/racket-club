@@ -3,6 +3,10 @@ import { zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
+export const skillLevelSchema = z.enum(["A", "B", "C", "D", "E", "OPEN"]);
+export const preferredPlayStyleSchema = z.enum(["MS", "MD", "WS", "WD", "XD"]);
+export const genderSchema = z.enum(["M", "F"]);
+
 export const userProfileSchema = z.object({
   userId: zid("users"),
   firstName: z
@@ -13,19 +17,19 @@ export const userProfileSchema = z.object({
     .string()
     .nonempty("Last name is required.")
     .max(64, "Must be 64 characters or fewer."),
-  gender: z.enum(["M", "F"]).optional(),
+  gender: genderSchema.optional(),
   dob: z.number().optional(),
-  skillLevel: z.enum(["A", "B", "C", "D", "E", "OPEN"]).optional(),
-  preferredPlayStyle: z.enum(["MS", "MD", "WS", "WD", "XD"]).optional(),
+  skillLevel: skillLevelSchema.optional(),
+  preferredPlayStyle: preferredPlayStyleSchema.optional(),
   bio: z.string().optional(),
   isAdmin: z.boolean(),
 });
 
-export const userProfileInputSchema = userProfileSchema.omit({ isAdmin: true });
-export type UserProfileInput = z.infer<typeof userProfileInputSchema>;
+export const userProfileCreateSchema = userProfileSchema.omit({ isAdmin: true });
+export type UserProfileCreateInput = z.infer<typeof userProfileCreateSchema>;
 
-export const userProfilePartialSchema = userProfileInputSchema.partial().required({ userId: true });
-export type UserProfilePartial = z.infer<typeof userProfilePartialSchema>;
+export const userProfileUpdateSchema = userProfileCreateSchema.partial().required({ userId: true });
+export type UserProfileUpdateInput = z.infer<typeof userProfileUpdateSchema>;
 
 export const userProfileTable = defineTable(zodToConvex(userProfileSchema))
   .index("userId", ["userId"])
@@ -34,8 +38,12 @@ export const userProfileTable = defineTable(zodToConvex(userProfileSchema))
 export type User = DocumentByName<DataModel, "users">;
 export type UserProfile = DocumentByName<DataModel, "userProfiles">;
 
-export interface CurrentUser extends User {
+export interface UserDetails extends User {
   profile: UserProfile | null;
+}
+
+export interface UserDetailsWithProfile extends User {
+  profile: UserProfile;
 }
 
 export const userTables = {

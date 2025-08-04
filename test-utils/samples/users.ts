@@ -1,58 +1,86 @@
 import { Id, TableNames } from "@/convex/_generated/dataModel";
-import { CurrentUser, User, UserProfile } from "@/convex/service/users/schemas";
+import schema from "@/convex/schema";
+import {
+  User,
+  UserDetails,
+  UserDetailsWithProfile,
+  UserProfile,
+} from "@/convex/service/users/schemas";
+import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
 
 let idCounter = 0;
-export const genId = <T extends TableNames>(prefix: string): Id<T> =>
-  `${prefix}_${++idCounter}` as Id<T>;
+export const genId = <T extends TableNames>(prefix: string): Id<T> => {
+  return `${prefix}_${++idCounter}` as Id<T>;
+};
 
-interface CreateTestUserArgs extends Omit<Partial<CurrentUser>, "profile"> {
+interface CreateTestUserArgs extends Omit<Partial<UserDetails>, "profile"> {
   profile?: Partial<UserProfile> | null;
 }
 
-export function createTestProfile(
+type CreateTestUserReturn<T extends CreateTestUserArgs> = T["profile"] extends null
+  ? UserDetails
+  : UserDetailsWithProfile;
+
+export const createTestProfile = (
   userId: Id<"users">,
-  profile?: Partial<UserProfile>,
-): WithoutSystemFields<UserProfile> {
+  overrides?: Partial<UserProfile>,
+): WithoutSystemFields<UserProfile> => {
   return {
     userId,
     firstName: `User ${userId}`,
     lastName: "(Test Generated)",
     isAdmin: false,
-    ...profile,
+    ...overrides,
   };
-}
+};
 
-export function createTestProfileRecord(
+export const createTestProfileRecord = (
   userId: Id<"users">,
-  profile?: Partial<UserProfile>,
-): UserProfile {
+  overrides?: Partial<UserProfile>,
+): UserProfile => {
   const id = genId<"userProfiles">("userProfiles");
   return {
     _id: id,
     _creationTime: Date.now(),
-    ...createTestProfile(userId),
-    ...profile,
+    ...createTestProfile(userId, overrides),
   };
-}
+};
 
-export function createTestUser(user?: Partial<User>): WithoutSystemFields<User> {
-  return { email: "test@example.com", ...user };
-}
+export const createTestUser = (overrides?: Partial<User>): WithoutSystemFields<User> => {
+  return { email: "test@example.com", ...overrides };
+};
 
-export function createTestUserRecord({ profile, ...rest }: CreateTestUserArgs = {}): CurrentUser {
+export const createTestUserRecord = <T extends CreateTestUserArgs>(
+  { profile, ...overrides }: T = {} as T,
+): CreateTestUserReturn<T> => {
   const userId = genId<"users">("users");
   return {
     _id: userId,
     _creationTime: Date.now(),
-    ...createTestUser(),
-    ...rest,
-    profile:
-      profile === null
-        ? null
-        : {
-            ...createTestProfileRecord(userId),
-            ...profile,
-          },
-  };
+    ...createTestUser(overrides),
+    profile: profile === null ? null : createTestProfileRecord(userId, profile),
+  } as CreateTestUserReturn<T>;
+};
+
+export class UserTestHelpers {
+  constructor(private t: TestConvex<typeof schema>) {}
+
+  async insertUser(email = "test@example.com") {
+    return await this.t.run(async (ctx) => {
+      return await ctx.db.insert("users", { email });
+    });
+  }
+
+  async insertProfile(profile: WithoutSystemFields<UserProfile>) {
+    return await this.t.run(async (ctx) => {
+      return await ctx.db.insert("userProfiles", {
+        ...profile,
+      });
+    });
+  }
+
+  async getProfile(profileId: Id<"userProfiles">) {
+    return await this.t.run(async (ctx) => ctx.db.get(profileId));
+  }
 }
