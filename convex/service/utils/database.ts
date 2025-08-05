@@ -1,7 +1,7 @@
 import { DataModel } from "@/convex/_generated/dataModel";
 import { QueryCtx } from "@/convex/_generated/server";
+import { UserDetails } from "@/convex/service/users/schemas";
 import { Rules } from "convex-helpers/server/rowLevelSecurity";
-import { UserDetails } from "../users/schemas";
 
 /**
  * Defines row-level security (RLS) rules for database operations.

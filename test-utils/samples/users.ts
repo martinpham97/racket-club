@@ -1,4 +1,4 @@
-import { Id, TableNames } from "@/convex/_generated/dataModel";
+import { Id } from "@/convex/_generated/dataModel";
 import schema from "@/convex/schema";
 import {
   User,
@@ -8,11 +8,7 @@ import {
 } from "@/convex/service/users/schemas";
 import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
-
-let idCounter = 0;
-export const genId = <T extends TableNames>(prefix: string): Id<T> => {
-  return `${prefix}_${++idCounter}` as Id<T>;
-};
+import { genId } from "./id";
 
 interface CreateTestUserArgs extends Omit<Partial<UserDetails>, "profile"> {
   profile?: Partial<UserProfile> | null;
@@ -82,5 +78,9 @@ export class UserTestHelpers {
 
   async getProfile(profileId: Id<"userProfiles">) {
     return await this.t.run(async (ctx) => ctx.db.get(profileId));
+  }
+
+  async deleteProfile(profileId: Id<"userProfiles">) {
+    return await this.t.run(async (ctx) => ctx.db.delete(profileId));
   }
 }

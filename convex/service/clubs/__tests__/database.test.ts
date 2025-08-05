@@ -1,21 +1,21 @@
 import { QueryCtx } from "@/convex/_generated/server";
 import { CLUB_NOT_FOUND_ERROR } from "@/convex/constants/errors";
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
-import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestClub, createTestClubRecord } from "@/test-utils/samples/clubs";
-import { createTestUserRecord, genId } from "@/test-utils/samples/users";
-import { ConvexError } from "convex/values";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createClub,
   getClub,
   getClubOrThrow,
   getMyClubMembership,
-  listClubMembers,
   listMyClubs,
   listPublicClubs,
   updateClub,
-} from "../database";
+} from "@/convex/service/clubs/database";
+import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { createMockCtx } from "@/test-utils/mocks/ctx";
+import { createTestClub, createTestClubRecord } from "@/test-utils/samples/clubs";
+import { genId } from "@/test-utils/samples/id";
+import { createTestUserRecord } from "@/test-utils/samples/users";
+import { ConvexError } from "convex/values";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createMockAuthCtx = (): AuthenticatedWithProfileCtx =>
   ({
@@ -166,53 +166,6 @@ describe("Club Database Service", () => {
 
       expect(result.page).toHaveLength(1);
       expect(result.page[0]).toEqual({ ...club, membership });
-    });
-  });
-
-  describe("listClubMembers", () => {
-    it("returns approved members by default", async () => {
-      const clubId = genId<"clubs">("clubs");
-      const paginationOpts = { cursor: null, numItems: 10 };
-      const members = [{ clubId, isApproved: true }];
-      const paginatedResult = { page: members, isDone: true, continueCursor: null };
-
-      const mockQuery = {
-        withIndex: vi.fn(() => ({
-          paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
-        })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
-
-      const result = await listClubMembers(mockCtx, clubId, {}, paginationOpts);
-
-      expect(result).toEqual(paginatedResult);
-    });
-
-    it("returns all members when includeAllMembers is true", async () => {
-      const clubId = genId<"clubs">("clubs");
-      const paginationOpts = { cursor: null, numItems: 10 };
-      const members = [{ clubId, isApproved: false }];
-      const paginatedResult = { page: members, isDone: true, continueCursor: null };
-
-      const mockQuery = {
-        withIndex: vi.fn(() => ({
-          paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
-        })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
-
-      const result = await listClubMembers(
-        mockCtx,
-        clubId,
-        { includeAllMembers: true },
-        paginationOpts,
-      );
-
-      expect(result).toEqual(paginatedResult);
     });
   });
 

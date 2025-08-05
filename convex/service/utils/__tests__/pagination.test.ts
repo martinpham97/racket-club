@@ -1,5 +1,5 @@
+import { getPaginationOpts } from "@/convex/service/utils/pagination";
 import { describe, expect, it } from "vitest";
-import { getPaginationOpts } from "../pagination";
 
 describe("getPaginationOpts", () => {
   it("returns defaults when no options provided", () => {

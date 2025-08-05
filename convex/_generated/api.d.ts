@@ -10,7 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as constants_errors from "../constants/errors.js";
-import type * as constants_rateLimit from "../constants/rateLimit.js";
+import type * as constants_rateLimit from "../constants/rateLimitConfig.js";
 import type * as http from "../http.js";
 import type * as myFunctions from "../myFunctions.js";
 import type * as service_clubs_database from "../service/clubs/database.js";
@@ -26,11 +26,7 @@ import type * as service_utils_rateLimit from "../service/utils/rateLimit.js";
 import type * as service_utils_validators_auth from "../service/utils/validators/auth.js";
 import type * as service_utils_validators_rateLimit from "../service/utils/validators/rateLimit.js";
 
-import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
-} from "convex/server";
+import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -61,10 +57,7 @@ declare const fullApi: ApiFromModules<{
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 
-export declare const api: FilterApi<
-  typeof fullApiWithMounts,
-  FunctionReference<any, "public">
->;
+export declare const api: FilterApi<typeof fullApiWithMounts, FunctionReference<any, "public">>;
 export declare const internal: FilterApi<
   typeof fullApiWithMounts,
   FunctionReference<any, "internal">
@@ -104,12 +97,7 @@ export declare const components: {
         },
         { ok: true; retryAfter?: number } | { ok: false; retryAfter: number }
       >;
-      clearAll: FunctionReference<
-        "mutation",
-        "internal",
-        { before?: number },
-        null
-      >;
+      clearAll: FunctionReference<"mutation", "internal", { before?: number }, null>;
       getServerTime: FunctionReference<"mutation", "internal", {}, number>;
       getValue: FunctionReference<
         "query",

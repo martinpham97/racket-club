@@ -1,74 +1,153 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { UserDetails } from "@/convex/service/users/schemas";
-import { describe, expect, it } from "vitest";
-import { isOwnerOrSystemAdmin } from "../auth";
+import { QueryCtx } from "@/convex/_generated/server";
+import {
+  AUTH_ACCESS_DENIED_ERROR,
+  AUTH_UNAUTHENTICATED_ERROR,
+  USER_PROFILE_REQUIRED_ERROR,
+} from "@/convex/constants/errors";
+import { getCurrentUser } from "@/convex/service/users/database";
+import {
+  enforceAuthenticated,
+  enforceOwnershipOrAdmin,
+  isOwnerOrSystemAdmin,
+} from "@/convex/service/utils/validators/auth";
+import { createTestProfile, createTestUserRecord } from "@/test-utils/samples/users";
+import { ConvexError } from "convex/values";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("isOwnerOrSystemAdmin", () => {
-  const userId = "user123" as Id<"users">;
-  const otherUserId = "user456" as Id<"users">;
+vi.mock("@/convex/service/users/database", () => ({
+  getCurrentUser: vi.fn(),
+}));
 
-  it("returns true when user is the owner", () => {
-    const currentUser: UserDetails = {
-      _id: userId,
-      _creationTime: Date.now(),
-      email: "test@example.com",
-      profile: {
-        _id: "profile123" as Id<"userProfiles">,
-        _creationTime: Date.now(),
-        userId,
-        firstName: "John",
-        lastName: "Doe",
-        isAdmin: false,
-      },
-    };
+const mockGetCurrentUser = vi.mocked(getCurrentUser);
 
-    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(true);
+describe("Auth Validators", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("returns true when user is an admin", () => {
-    const currentUser: UserDetails = {
-      _id: otherUserId,
-      _creationTime: Date.now(),
-      email: "admin@example.com",
-      profile: {
-        _id: "profile456" as Id<"userProfiles">,
-        _creationTime: Date.now(),
-        userId: otherUserId,
-        firstName: "Admin",
-        lastName: "User",
-        isAdmin: true,
-      },
-    };
+  describe("isOwnerOrSystemAdmin", () => {
+    it("returns true when user is owner", () => {
+      const user = createTestUserRecord();
 
-    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(true);
+      const result = isOwnerOrSystemAdmin(user, user._id);
+
+      expect(result).toBe(true);
+    });
+
+    it("returns true when user is system admin", () => {
+      const userId = "user123" as Id<"users">;
+      const targetUserId = "target456" as Id<"users">;
+      const user = createTestUserRecord({
+        profile: createTestProfile(userId, { isAdmin: true }),
+      });
+
+      const result = isOwnerOrSystemAdmin(user, targetUserId);
+
+      expect(result).toBe(true);
+    });
+
+    it("returns false when user is neither owner nor admin", () => {
+      const userId = "user123" as Id<"users">;
+      const targetUserId = "target456" as Id<"users">;
+      const user = createTestUserRecord({
+        profile: createTestProfile(userId, { isAdmin: false }),
+      });
+
+      const result = isOwnerOrSystemAdmin(user, targetUserId);
+
+      expect(result).toBe(false);
+    });
+
+    it("returns false when user has no profile", () => {
+      const targetUserId = "target456" as Id<"users">;
+      const user = createTestUserRecord();
+
+      const result = isOwnerOrSystemAdmin(user, targetUserId);
+
+      expect(result).toBe(false);
+    });
   });
 
-  it("returns false when user is neither owner nor admin", () => {
-    const currentUser: UserDetails = {
-      _id: otherUserId,
-      _creationTime: Date.now(),
-      email: "regular@example.com",
-      profile: {
-        _id: "profile456" as Id<"userProfiles">,
-        _creationTime: Date.now(),
-        userId: otherUserId,
-        firstName: "Regular",
-        lastName: "User",
-        isAdmin: false,
-      },
-    };
+  describe("enforceOwnershipOrAdmin", () => {
+    it("allows owner access", () => {
+      const user = createTestUserRecord();
 
-    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(false);
+      expect(() => enforceOwnershipOrAdmin(user, user._id)).not.toThrow();
+    });
+
+    it("allows system admin access", () => {
+      const userId = "user123" as Id<"users">;
+      const targetUserId = "target456" as Id<"users">;
+      const user = createTestUserRecord({
+        profile: createTestProfile(userId, { isAdmin: true }),
+      });
+
+      expect(() => enforceOwnershipOrAdmin(user, targetUserId)).not.toThrow();
+    });
+
+    it("throws when user is neither owner nor admin", () => {
+      const userId = "user123" as Id<"users">;
+      const targetUserId = "target456" as Id<"users">;
+      const user = createTestUserRecord({
+        profile: createTestProfile(userId, { isAdmin: false }),
+      });
+
+      expect(() => enforceOwnershipOrAdmin(user, targetUserId)).toThrow(
+        new ConvexError(AUTH_ACCESS_DENIED_ERROR),
+      );
+    });
   });
 
-  it("returns false when user has no profile", () => {
-    const currentUser: UserDetails = {
-      _id: otherUserId,
-      _creationTime: Date.now(),
-      email: "noprofile@example.com",
-      profile: null,
-    };
+  describe("enforceAuthenticated", () => {
+    it("returns user when authenticated", async () => {
+      const user = createTestUserRecord();
+      mockGetCurrentUser.mockResolvedValue(user);
 
-    expect(isOwnerOrSystemAdmin(currentUser, userId)).toBe(false);
+      const ctx = {} as QueryCtx;
+      const result = await enforceAuthenticated(ctx);
+
+      expect(result).toEqual(user);
+    });
+
+    it("throws when not authenticated", async () => {
+      mockGetCurrentUser.mockResolvedValue(null);
+
+      const ctx = {} as QueryCtx;
+      await expect(enforceAuthenticated(ctx)).rejects.toThrow(
+        new ConvexError(AUTH_UNAUTHENTICATED_ERROR),
+      );
+    });
+
+    it("returns user when profile not required", async () => {
+      const user = createTestUserRecord();
+      mockGetCurrentUser.mockResolvedValue(user);
+
+      const ctx = {} as QueryCtx;
+      const result = await enforceAuthenticated(ctx, { profileRequired: false });
+
+      expect(result).toEqual(user);
+    });
+
+    it("returns user when profile required and exists", async () => {
+      const userId = "user123" as Id<"users">;
+      const user = createTestUserRecord({ profile: createTestProfile(userId) });
+      mockGetCurrentUser.mockResolvedValue(user);
+
+      const ctx = {} as QueryCtx;
+      const result = await enforceAuthenticated(ctx, { profileRequired: true });
+
+      expect(result).toEqual(user);
+    });
+
+    it("throws when profile required but missing", async () => {
+      const user = createTestUserRecord({ profile: null });
+      mockGetCurrentUser.mockResolvedValue(user);
+
+      const ctx = {} as QueryCtx;
+      await expect(enforceAuthenticated(ctx, { profileRequired: true })).rejects.toThrow(
+        new ConvexError(USER_PROFILE_REQUIRED_ERROR),
+      );
+    });
   });
 });

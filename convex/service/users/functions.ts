@@ -4,6 +4,7 @@ import {
 } from "@/convex/constants/errors";
 import { authenticatedMutationWithRLS, publicQueryWithRLS } from "@/convex/service/utils/functions";
 import { enforceOwnershipOrAdmin } from "@/convex/service/utils/validators/auth";
+import { validateDateOfBirth } from "@/convex/service/utils/validators/profile";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
 import { ConvexError } from "convex/values";
 import {
@@ -35,6 +36,12 @@ export const createUserProfile = authenticatedMutationWithRLS({ profileRequired:
   handler: async (ctx, args) => {
     const { currentUser } = ctx;
     enforceOwnershipOrAdmin(currentUser, args.userId);
+
+    // Validate profile data
+    if (args.dob) {
+      validateDateOfBirth(args.dob);
+    }
+
     const existingProfile = await dtoGetProfileByUserId(ctx, args.userId);
     if (existingProfile) {
       throw new ConvexError(USER_PROFILE_ALREADY_EXISTS_ERROR);
@@ -55,6 +62,12 @@ export const updateUserProfile = authenticatedMutationWithRLS()({
     const { currentUser } = ctx;
     await enforceRateLimit(ctx, "profileUpdate", currentUser._id);
     enforceOwnershipOrAdmin(currentUser, args.userId);
+
+    // Validate profile data
+    if (args.dob) {
+      validateDateOfBirth(args.dob);
+    }
+
     const profile = await dtoGetProfileByUserId(ctx, args.userId);
     if (!profile) {
       throw new ConvexError(USER_PROFILE_REQUIRED_ERROR);

@@ -3,7 +3,7 @@ import schema from "@/convex/schema";
 import { Club, ClubCreateInput, ClubMembership } from "@/convex/service/clubs/schemas";
 import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
-import { genId } from "./users";
+import { genId } from "./id";
 
 export const createTestClubInput = (overrides?: Partial<ClubCreateInput>): ClubCreateInput => {
   return {
@@ -48,12 +48,12 @@ export const createTestClubRecord = (createdBy: Id<"users">, overrides?: Partial
 
 export const createTestClubMembership = (
   clubId: Id<"clubs">,
-  profileId: Id<"userProfiles">,
+  userId: Id<"users">,
   overrides?: Partial<ClubMembership>,
 ): WithoutSystemFields<ClubMembership> => {
   return {
     clubId,
-    profileId,
+    userId,
     name: "Test Member",
     isApproved: true,
     isClubAdmin: false,
@@ -64,13 +64,13 @@ export const createTestClubMembership = (
 
 export const createTestClubMembershipRecord = (
   clubId: Id<"clubs">,
-  profileId: Id<"userProfiles">,
+  userId: Id<"users">,
   overrides?: Partial<ClubMembership>,
 ): ClubMembership => {
   return {
     _id: genId<"clubMemberships">("clubMemberships"),
     _creationTime: Date.now(),
-    ...createTestClubMembership(clubId, profileId, overrides),
+    ...createTestClubMembership(clubId, userId, overrides),
   };
 };
 
@@ -81,6 +81,10 @@ export class ClubTestHelpers {
     return await this.t.run(async (ctx) => {
       return await ctx.db.insert("clubs", club);
     });
+  }
+
+  async deleteClub(clubId: Id<"clubs">) {
+    return await this.t.run(async (ctx) => ctx.db.delete(clubId));
   }
 
   async insertMembership(membership: WithoutSystemFields<ClubMembership>) {
@@ -101,12 +105,16 @@ export class ClubTestHelpers {
     return await this.t.run(async (ctx) => ctx.db.get(membershipId));
   }
 
-  async getMembershipForProfile(clubId: Id<"clubs">, profileId: Id<"userProfiles">) {
+  async getMembershipForUser(clubId: Id<"clubs">, userId: Id<"users">) {
     return await this.t.run(async (ctx) =>
       ctx.db
         .query("clubMemberships")
-        .withIndex("clubProfile", (q) => q.eq("clubId", clubId).eq("profileId", profileId))
+        .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
         .unique(),
     );
+  }
+
+  async deleteClubMembership(membershipId: Id<"clubMemberships">) {
+    return await this.t.run(async (ctx) => ctx.db.delete(membershipId));
   }
 }

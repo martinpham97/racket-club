@@ -1,10 +1,10 @@
 import { DataModel } from "@/convex/_generated/dataModel";
 import { mutation, MutationCtx, query } from "@/convex/_generated/server";
+import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
 import { customCtxAndArgs } from "convex-helpers/server/customFunctions";
 import { wrapDatabaseReader, wrapDatabaseWriter } from "convex-helpers/server/rowLevelSecurity";
 import { zCustomMutation, zCustomQuery } from "convex-helpers/server/zod";
 import { GenericDatabaseReader, GenericDatabaseWriter } from "convex/server";
-import { UserDetailsWithProfile } from "../users/schemas";
 import { rlsRules } from "./database";
 import { enforceAuthenticated } from "./validators/auth";
 
@@ -34,7 +34,7 @@ export const publicQueryWithRLS = () => {
       }),
     }),
   );
-}
+};
 
 /**
  * Creates an authenticated query with row-level security (RLS) applied.
@@ -61,7 +61,7 @@ export const authenticatedQueryWithRLS = (options: AuthenticationOptions = {}) =
       },
     }),
   );
-}
+};
 
 /**
  * Creates an authenticated mutation with row-level security (RLS) applied.
@@ -88,4 +88,4 @@ export const authenticatedMutationWithRLS = (options: AuthenticationOptions = {}
       },
     }),
   );
-}
+};

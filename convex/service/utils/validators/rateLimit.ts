@@ -1,5 +1,5 @@
 import { RATE_LIMIT_REACHED_ERROR_TEMPLATE } from "@/convex/constants/errors";
-import { LIMIT_CONFIG } from "@/convex/constants/rateLimit";
+import { LIMIT_CONFIG } from "@/convex/constants/rateLimitConfig";
 import { rateLimiter } from "@/convex/service/utils/rateLimit";
 import { RunMutationCtx, RunQueryCtx } from "@convex-dev/rate-limiter";
 import { ConvexError } from "convex/values";
@@ -16,7 +16,11 @@ import template from "string-template";
 export const enforceRateLimit = async <
   Ctx extends RunQueryCtx & RunMutationCtx,
   Name extends keyof typeof LIMIT_CONFIG,
->(ctx: Ctx, limitName: Name, key?: string) => {
+>(
+  ctx: Ctx,
+  limitName: Name,
+  key?: string,
+) => {
   const { ok, retryAfter } = await rateLimiter.limit(ctx, limitName as keyof typeof LIMIT_CONFIG, {
     key,
   });

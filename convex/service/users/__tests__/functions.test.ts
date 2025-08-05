@@ -2,6 +2,7 @@ import { api } from "@/convex/_generated/api";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   USER_PROFILE_ALREADY_EXISTS_ERROR,
+  USER_PROFILE_REQUIRED_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
@@ -167,6 +168,58 @@ describe("User Functions", () => {
       await expect(
         asUser.mutation(api.service.users.functions.updateUserProfile, args),
       ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+
+    it("validates date of birth in createUserProfile", async () => {
+      const userId = await helpers.insertUser();
+      const futureDate = Date.now() + 24 * 60 * 60 * 1000;
+
+      const args = {
+        userId,
+        firstName: "Test",
+        lastName: "User",
+        dob: futureDate,
+      };
+      const asUser = t.withIdentity({ subject: userId });
+
+      await expect(
+        asUser.mutation(api.service.users.functions.createUserProfile, args),
+      ).rejects.toThrow("Date of birth cannot be in the future");
+    });
+  });
+
+  describe("updateUserProfile", () => {
+    it("validates date of birth in updateUserProfile", async () => {
+      const userId = await helpers.insertUser();
+      const profile = createTestProfile(userId);
+      await helpers.insertProfile(profile);
+
+      const futureDate = Date.now() + 24 * 60 * 60 * 1000;
+      const args = { userId, dob: futureDate };
+      const asUser = t.withIdentity({ subject: userId });
+
+      await expect(
+        asUser.mutation(api.service.users.functions.updateUserProfile, args),
+      ).rejects.toThrow("Date of birth cannot be in the future");
+    });
+
+    it("throws when profile doesn't exist for update", async () => {
+      const adminId = await helpers.insertUser("admin@example.com");
+      await helpers.insertProfile({
+        firstName: "Admin",
+        lastName: "User",
+        isAdmin: true,
+        userId: adminId,
+      });
+
+      const userId = await helpers.insertUser();
+
+      const args = { userId, firstName: "Updated" };
+      const asUser = t.withIdentity({ subject: adminId });
+
+      await expect(
+        asUser.mutation(api.service.users.functions.updateUserProfile, args),
+      ).rejects.toThrow(USER_PROFILE_REQUIRED_ERROR);
     });
   });
 });

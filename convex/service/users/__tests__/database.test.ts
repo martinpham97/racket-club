@@ -9,7 +9,8 @@ import {
   updateUserProfile,
 } from "@/convex/service/users/database";
 import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestUserRecord, genId } from "@/test-utils/samples/users";
+import { genId } from "@/test-utils/samples/id";
+import { createTestUserRecord } from "@/test-utils/samples/users";
 import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

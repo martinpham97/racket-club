@@ -21,7 +21,7 @@ export const clubSchema = z.object({
   maxMembers: z
     .number()
     .positive("Must be a positive number.")
-    .max(100, "You only can have up to 100 members."),
+    .max(100, "You only can have up to 100 members per club."),
   numMembers: z.number().nonnegative(),
   createdBy: zid("users"),
   isApproved: z.boolean(),
@@ -30,15 +30,20 @@ export const clubSchema = z.object({
     placeId: z.string(),
     name: z.string(),
   }),
-  skillLevels: z.object({
-    min: z.number().nonnegative().max(5),
-    max: z.number().nonnegative().max(5),
-  }),
+  skillLevels: z
+    .object({
+      min: z.number().nonnegative().max(5),
+      max: z.number().nonnegative().max(5),
+    })
+    .refine((data) => data.min <= data.max, {
+      message: "Minimum skill level must be less than or equal to maximum skill level.",
+      path: ["min"],
+    }),
 });
 
 export const clubMembershipSchema = z.object({
   clubId: zid("clubs"),
-  profileId: zid("userProfiles"),
+  userId: zid("users"),
   name: z.string().max(128, "Your name must be less than 128 characters long."),
   gender: genderSchema.optional(),
   skillLevel: skillLevelSchema.optional(),
@@ -55,6 +60,18 @@ export const clubMembershipInputSchema = clubMembershipSchema.pick({
   preferredPlayStyle: true,
 });
 export type ClubMembershipInput = z.infer<typeof clubMembershipInputSchema>;
+
+export const clubMembershipUpdateInputSchema = clubMembershipSchema
+  .pick({
+    name: true,
+    gender: true,
+    skillLevel: true,
+    preferredPlayStyle: true,
+    isApproved: true,
+    isClubAdmin: true,
+  })
+  .partial();
+export type ClubMembershipUpdateInput = z.infer<typeof clubMembershipUpdateInputSchema>;
 
 export const clubCreateInputSchema = clubSchema.omit({
   createdBy: true,
@@ -75,12 +92,13 @@ export type MyClub = DocumentByName<DataModel, "clubs"> & {
 
 export const clubTable = defineTable(zodToConvex(clubSchema))
   .index("createdBy", ["createdBy"])
-  .index("publicApproved", ["isPublic", "isApproved"]);
+  .index("publicApproved", ["isPublic", "isApproved"])
+  .index("publicName", ["isPublic", "name"]);
 
 export const clubMembershipTable = defineTable(zodToConvex(clubMembershipSchema))
   .index("clubApproved", ["clubId", "isApproved"])
-  .index("profileId", ["profileId"])
-  .index("clubProfile", ["clubId", "profileId"]);
+  .index("userId", ["userId"])
+  .index("clubUser", ["clubId", "userId"]);
 
 export const clubTables = {
   clubs: clubTable,

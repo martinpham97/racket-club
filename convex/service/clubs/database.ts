@@ -8,10 +8,6 @@ import { PaginationOptions, PaginationResult } from "convex/server";
 import { ConvexError } from "convex/values";
 import { Club, ClubCreateInput, ClubMembership, ClubUpdateInput, MyClub } from "./schemas";
 
-type ClubQueryOptions = {
-  includeAllMembers?: boolean;
-};
-
 /**
  * Gets a club by its ID.
  * @param ctx Query context
@@ -49,9 +45,7 @@ export const getMyClubMembership = async (
 ): Promise<ClubMembership | null> => {
   return await ctx.db
     .query("clubMemberships")
-    .withIndex("clubProfile", (q) =>
-      q.eq("clubId", clubId).eq("profileId", ctx.currentUser.profile._id),
-    )
+    .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", ctx.currentUser._id))
     .unique();
 };
 
@@ -83,7 +77,7 @@ export const listMyClubs = async (
 ): Promise<PaginationResult<MyClub>> => {
   const memberships = await ctx.db
     .query("clubMemberships")
-    .withIndex("profileId", (q) => q.eq("profileId", ctx.currentUser.profile._id))
+    .withIndex("userId", (q) => q.eq("userId", ctx.currentUser._id))
     .paginate(paginationOpts);
   const clubPromises = memberships.page.map(async (m) => {
     const club = await ctx.db.get(m.clubId);
@@ -91,28 +85,6 @@ export const listMyClubs = async (
   });
   const myClubs = (await Promise.all(clubPromises)).filter(Boolean) as MyClub[];
   return { ...memberships, page: myClubs };
-};
-
-/**
- * Lists members of a specific club with pagination and filtering options.
- * By default, this will list only approved club members unless `clubQueryOptions.includeAllMembers` is `true`.
- * @param ctx Query context
- * @param clubId Club ID to get members for
- * @param clubQueryOptions Query options (includeAllMembers)
- * @param paginationOpts Pagination options (cursor, numItems)
- * @returns Paginated result of club memberships
- */
-export const listClubMembers = async (
-  ctx: QueryCtx,
-  clubId: Id<"clubs">,
-  clubQueryOptions: ClubQueryOptions = {},
-  paginationOpts: PaginationOptions,
-): Promise<PaginationResult<ClubMembership>> => {
-  const query = ctx.db.query("clubMemberships").withIndex("clubApproved", (q) => {
-    const baseQuery = q.eq("clubId", clubId);
-    return clubQueryOptions.includeAllMembers ? baseQuery : baseQuery.eq("isApproved", true);
-  });
-  return await query.paginate(paginationOpts);
 };
 
 /**
@@ -145,4 +117,22 @@ export const updateClub = async (
   input: ClubUpdateInput,
 ): Promise<void> => {
   return await ctx.db.patch(clubId, input);
+};
+
+/**
+ * Deletes all memberships for the given club
+ * @param ctx Authenticated context with profile
+ * @param clubId Club ID
+ */
+export const deleteAllClubMemberships = async (
+  ctx: AuthenticatedWithProfileCtx,
+  clubId: Id<"clubs">,
+): Promise<void> => {
+  // Get and delete all memberships within the current club
+  const memberships = await ctx.db
+    .query("clubMemberships")
+    .withIndex("clubApproved", (q) => q.eq("clubId", clubId))
+    .collect();
+  memberships.forEach(async (membership) => await ctx.db.delete(membership._id));
+  await ctx.db.patch(clubId, { numMembers: 0 });
 };

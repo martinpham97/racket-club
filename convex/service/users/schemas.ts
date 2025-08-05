@@ -12,16 +12,16 @@ export const userProfileSchema = z.object({
   firstName: z
     .string()
     .nonempty("First name is required.")
-    .max(64, "Must be 64 characters or fewer."),
+    .max(64, "First name must be 64 characters or fewer."),
   lastName: z
     .string()
     .nonempty("Last name is required.")
-    .max(64, "Must be 64 characters or fewer."),
+    .max(64, "Last name must be 64 characters or fewer."),
   gender: genderSchema.optional(),
   dob: z.number().optional(),
   skillLevel: skillLevelSchema.optional(),
   preferredPlayStyle: preferredPlayStyleSchema.optional(),
-  bio: z.string().optional(),
+  bio: z.string().max(300, "Bio must be 300 characters or fewer.").optional(),
   isAdmin: z.boolean(),
 });
 
