@@ -35,6 +35,7 @@ import {
   updateClub as dtoUpdateClub,
 } from "./database";
 import {
+  Club,
   clubCreateInputSchema,
   ClubMembership,
   ClubMembershipInput,
@@ -279,14 +280,17 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
     const { memberships, club } = await validateBulkMemberships(ctx, args.membershipIds);
     if (memberships.length === 0 || !club) return 0;
 
-    let removedCount = 0;
-    for (const membership of memberships) {
-      if (membership.userId === club.createdBy) continue;
-
-      await ctx.db.delete(membership._id);
-      removedCount++;
+    const ownerMembership = memberships.find((m) => m.userId === club.createdBy);
+    if (ownerMembership) {
+      throw new ConvexError(CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR);
     }
 
+    // Remove all memberships (owner check already done in validation)
+    for (const membership of memberships) {
+      await ctx.db.delete(membership._id);
+    }
+
+    const removedCount = memberships.length;
     if (removedCount > 0 && club.numMembers >= removedCount) {
       await dtoUpdateClub(ctx, club._id, { numMembers: club.numMembers - removedCount });
     }
@@ -399,7 +403,7 @@ const createClubMembershipInfo = (
 const validateBulkMemberships = async (
   ctx: AuthenticatedWithProfileCtx,
   membershipIds: Id<"clubMemberships">[],
-) => {
+): Promise<{ memberships: ClubMembership[]; club: Club | null }> => {
   if (membershipIds.length === 0) return { memberships: [], club: null };
 
   const memberships = await Promise.all(membershipIds.map((id) => ctx.db.get(id)));
