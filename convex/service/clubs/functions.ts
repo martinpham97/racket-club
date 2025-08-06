@@ -1,5 +1,6 @@
 import { Id } from "@/convex/_generated/dataModel";
 import {
+  AUTH_ACCESS_DENIED_ERROR,
   CLUB_FULL_ERROR,
   CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR,
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
@@ -9,6 +10,7 @@ import {
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
 } from "@/convex/constants/errors";
+import { listActivitiesForResource as dtoListActivitiesForResource } from "@/convex/service/activities/database";
 import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
 import {
   authenticatedMutationWithRLS,
@@ -30,6 +32,7 @@ import {
   createClub as dtoCreateClub,
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
   getClubOrThrow as dtoGetClubOrThrow,
+  getMyClubMembership as dtoGetMyClubMembership,
   listMyClubs as dtoListMyClubs,
   listPublicClubs as dtoListPublicClubs,
   updateClub as dtoUpdateClub,
@@ -49,9 +52,9 @@ import {
  * @returns Paginated list of public clubs
  */
 export const listPublicClubs = publicQueryWithRLS()({
-  args: convexToZod(paginationOptsValidator),
+  args: { pagination: convexToZod(paginationOptsValidator) },
   handler: async (ctx, args) => {
-    return await dtoListPublicClubs(ctx, args);
+    return await dtoListPublicClubs(ctx, args.pagination);
   },
 });
 
@@ -60,9 +63,9 @@ export const listPublicClubs = publicQueryWithRLS()({
  * @returns Paginated list of user's clubs with membership details
  */
 export const listMyClubs = authenticatedQueryWithRLS()({
-  args: convexToZod(paginationOptsValidator),
+  args: { pagination: convexToZod(paginationOptsValidator) },
   handler: async (ctx, args) => {
-    return await dtoListMyClubs(ctx, args);
+    return await dtoListMyClubs(ctx, args.pagination);
   },
 });
 
@@ -295,6 +298,28 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
       await dtoUpdateClub(ctx, club._id, { numMembers: club.numMembers - removedCount });
     }
     return removedCount;
+  },
+});
+
+/**
+ * Lists activities for a club.
+ * Only members can see club activities.
+ * @returns Paginated list of club activities
+ */
+export const listClubActivities = authenticatedQueryWithRLS()({
+  args: {
+    clubId: zid("clubs"),
+    pagination: convexToZod(paginationOptsValidator),
+  },
+  handler: async (ctx, args) => {
+    await dtoGetClubOrThrow(ctx, args.clubId);
+    const membership = await dtoGetMyClubMembership(ctx, args.clubId);
+
+    if (!membership) {
+      throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
+    }
+
+    return await dtoListActivitiesForResource(ctx, args.clubId, args.pagination);
   },
 });
 

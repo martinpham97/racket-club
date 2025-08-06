@@ -40,4 +40,18 @@ export const LIMIT_CONFIG = {
     rate: 20,
     capacity: 20,
   },
+  // Creating an activity
+  createActivity: {
+    kind: "fixed window",
+    period: DAY,
+    rate: 50,
+    capacity: 50,
+  },
+  // Updating an activity
+  updateActivity: {
+    kind: "fixed window",
+    period: DAY,
+    rate: 100,
+    capacity: 100,
+  },
 } as const;

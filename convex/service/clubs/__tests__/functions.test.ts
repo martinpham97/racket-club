@@ -7,6 +7,7 @@ import {
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
   CLUB_MEMBERSHIP_NOT_FOUND_ERROR,
   CLUB_MEMBERSHIP_REQUIRED_ERROR,
+  CLUB_NOT_FOUND_ERROR,
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
@@ -46,8 +47,7 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(club);
 
       const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(1);
@@ -60,8 +60,7 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(createTestClub(userId, { isApproved: false }));
 
       const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(0);
@@ -81,8 +80,7 @@ describe("Club Functions", () => {
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(1);
@@ -855,8 +853,7 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(privateApproved);
 
       const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(1);
@@ -877,8 +874,7 @@ describe("Club Functions", () => {
       }
 
       const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        cursor: null,
-        numItems: 3,
+        pagination: { cursor: null, numItems: 3 },
       });
 
       expect(result.page).toHaveLength(3);
@@ -907,8 +903,7 @@ describe("Club Functions", () => {
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(2);
@@ -921,8 +916,7 @@ describe("Club Functions", () => {
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(0);
@@ -949,8 +943,7 @@ describe("Club Functions", () => {
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        cursor: null,
-        numItems: 10,
+        pagination: { cursor: null, numItems: 10 },
       });
 
       expect(result.page).toHaveLength(1);
@@ -1026,6 +1019,60 @@ describe("Club Functions", () => {
       await expect(
         asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
       ).rejects.toThrow(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
+    });
+  });
+
+  describe("listClubActivities", () => {
+    it("returns activities when user is club member", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      await clubHelpers.insertMembership(membership);
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.query(api.service.clubs.functions.listClubActivities, {
+        clubId,
+        pagination: { cursor: null, numItems: 10 },
+      });
+
+      expect(result).toBeDefined();
+      expect(result.page).toBeDefined();
+    });
+
+    it("throws error when club does not exist", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.deleteClub(clubId);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.query(api.service.clubs.functions.listClubActivities, {
+          clubId,
+          pagination: { cursor: null, numItems: 10 },
+        }),
+      ).rejects.toThrow(CLUB_NOT_FOUND_ERROR);
+    });
+
+    it("throws error when user is not club member", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("user@example.com");
+      await userHelpers.insertProfile(createTestProfile(userId));
+
+      const club = createTestClub(ownerId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.query(api.service.clubs.functions.listClubActivities, {
+          clubId,
+          pagination: { cursor: null, numItems: 10 },
+        }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
     });
   });
 });
