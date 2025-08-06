@@ -52,20 +52,6 @@ export const createActivity = async (
 };
 
 /**
- * Updates an existing activity.
- * @param ctx Authenticated context with profile
- * @param activityId Activity ID to update
- * @param updates Activity update data
- */
-export const updateActivity = async (
-  ctx: AuthenticatedWithProfileCtx,
-  activityId: Id<"activities">,
-  updates: Partial<WithoutSystemFields<Activity>>,
-): Promise<void> => {
-  return await ctx.db.patch(activityId, updates);
-};
-
-/**
  * Deletes all activities relating to the given resource.
  * @param ctx Authenticated context with profile
  * @param resourceId Related resource ID
@@ -76,7 +62,7 @@ export const deleteActivitiesForResource = async (
 ): Promise<void> => {
   const activities = await ctx.db
     .query("activities")
-    .withIndex("resourceId", (q) => q.eq("resourceId", resourceId))
+    .withIndex("resourceType", (q) => q.eq("resourceId", resourceId))
     .order("desc")
     .collect();
   activities.forEach(async (activity) => await ctx.db.delete(activity._id));

@@ -1,6 +1,8 @@
 import { api } from "@/convex/_generated/api";
+import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import { AUTH_ACCESS_DENIED_ERROR } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
+import { ActivityTestHelpers } from "@/test-utils/samples/activities";
 import {
   ClubTestHelpers,
   createTestClub,
@@ -18,11 +20,13 @@ describe("Bulk Club Operations", () => {
   let t: ReturnType<typeof convexTest>;
   let userHelpers: UserTestHelpers;
   let clubHelpers: ClubTestHelpers;
+  let activityHelpers: ActivityTestHelpers;
 
   beforeEach(() => {
     t = convexTest(schema);
     userHelpers = new UserTestHelpers(t);
     clubHelpers = new ClubTestHelpers(t);
+    activityHelpers = new ActivityTestHelpers(t);
   });
 
   describe("approveClubMemberships", () => {
@@ -107,6 +111,15 @@ describe("Bulk Club Operations", () => {
 
       expect(updatedMembership1?.isApproved).toBe(true);
       expect(updatedMembership2?.isApproved).toBe(true);
+
+      // Validate join activities were created
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const joinActivities = activities.filter((a) => a.type === ACTIVITY_TYPES.CLUB_JOINED);
+      expect(joinActivities).toHaveLength(2);
+      joinActivities.forEach((activity) => {
+        expect(activity.createdBy).toBe(ownerId);
+        expect(activity.resourceId).toBe(clubId);
+      });
     });
 
     it("throws when memberships belong to different clubs", async () => {
@@ -219,6 +232,17 @@ describe("Bulk Club Operations", () => {
 
       const updatedClub = await clubHelpers.getClubRecord(clubId);
       expect(updatedClub?.numMembers).toBe(1);
+
+      // Validate removal activities were created
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const removeActivities = activities.filter(
+        (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+      );
+      expect(removeActivities).toHaveLength(2);
+      removeActivities.forEach((activity) => {
+        expect(activity.createdBy).toBe(ownerId);
+        expect(activity.resourceId).toBe(clubId);
+      });
     });
 
     it("throws when memberships belong to different clubs", async () => {

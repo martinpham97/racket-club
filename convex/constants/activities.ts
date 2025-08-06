@@ -1,16 +1,18 @@
 export const ACTIVITY_TYPES = {
-  CLUB_CREATED: "CLUB_CREATED",
-  CLUB_UPDATED: "CLUB_UPDATED",
-  CLUB_DELETED: "CLUB_DELETED",
-  CLUB_JOINED: "CLUB_JOINED",
-  CLUB_LEFT: "CLUB_LEFT",
-  CLUB_MEMBERSHIP_REMOVED: "CLUB_MEMBERSHIP_REMOVED",
-  CLUB_MEMBERSHIP_APPROVED: "CLUB_MEMBERSHIP_APPROVED",
-  CLUB_MEMBERSHIP_UPDATED: "CLUB_MEMBERSHIP_UPDATED",
-  USER_CREATED: "USER_CREATED",
-  USER_PROFILE_UPDATED: "USER_PROFILE_UPDATED",
+  CLUB_CREATED: "club:created",
+  CLUB_UPDATED: "club:updated",
+  CLUB_DELETED: "club:deleted",
+  CLUB_JOIN_REQUEST: "club:join-request",
+  CLUB_JOINED: "club:joined",
+  CLUB_LEFT: "club:left",
+  CLUB_MEMBERSHIP_REMOVED: "club:membership-removed",
+  CLUB_MEMBERSHIP_UPDATED: "club:membership-updated",
+  USER_CREATED: "user:created",
+  USER_PROFILE_UPDATED: "user:profile-updated",
 } as const;
 
-export type ActivityType = typeof ACTIVITY_TYPES[keyof typeof ACTIVITY_TYPES];
+export type ActivityType = (typeof ACTIVITY_TYPES)[keyof typeof ACTIVITY_TYPES];
+
+export const CLUB_JOINED_MESSAGE = "";
 
 export const activityTypes = Object.values(ACTIVITY_TYPES);

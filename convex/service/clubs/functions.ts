@@ -1,4 +1,5 @@
 import { Id } from "@/convex/_generated/dataModel";
+import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   CLUB_FULL_ERROR,
@@ -10,7 +11,10 @@ import {
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
 } from "@/convex/constants/errors";
-import { listActivitiesForResource as dtoListActivitiesForResource } from "@/convex/service/activities/database";
+import {
+  createActivity as dtoCreateActivity,
+  listActivitiesForResource as dtoListActivitiesForResource,
+} from "@/convex/service/activities/database";
 import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
 import {
   authenticatedMutationWithRLS,
@@ -28,6 +32,7 @@ import { convexToZod, zid } from "convex-helpers/server/zod";
 import { paginationOptsValidator, WithoutSystemFields } from "convex/server";
 import { ConvexError } from "convex/values";
 import { z } from "zod";
+import { getMetadata } from "../utils/metadata";
 import {
   createClub as dtoCreateClub,
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
@@ -86,13 +91,13 @@ export const getClub = publicQueryWithRLS()({
 /**
  * Allows an authenticated user to join a club with membership details.
  * By default, the user membership is non-admin and not approved.
- * @returns Membership ID
+ * @returns Membership details
  * @throws ConvexError when club doesn't exist or user is already a member
  */
 export const joinClub = authenticatedMutationWithRLS()({
   args: {
     clubId: zid("clubs"),
-    membershipInfo: clubMembershipInputSchema,
+    membershipInfo: clubMembershipInputSchema.optional(),
   },
   handler: async (ctx, args) => {
     // Rate limit current user from joining this club
@@ -105,9 +110,23 @@ export const joinClub = authenticatedMutationWithRLS()({
     if (club.isPublic && !club.isApproved) {
       throw new ConvexError(CLUB_PUBLIC_UNAPPROVED_ERROR);
     }
-    return await addCurrentUserToClub(ctx, args.clubId, {
-      membershipInfo: args.membershipInfo,
+    const { membershipInfo, membershipId } = await addCurrentUserToClub(ctx, args.clubId, {
+      membershipInfo: createClubMembershipInfo(ctx.currentUser, args.clubId, args.membershipInfo),
+      isApproved: false,
     });
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedIds: [membershipId],
+      type: ACTIVITY_TYPES.CLUB_JOIN_REQUEST,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          newValue: membershipInfo.name,
+        },
+      ],
+    });
+    return membershipInfo;
   },
 });
 
@@ -120,7 +139,19 @@ export const leaveClub = authenticatedMutationWithRLS()({
     clubId: zid("clubs"),
   },
   handler: async (ctx, args) => {
-    return await removeCurrentUserFromClub(ctx, args.clubId);
+    const membership = await removeCurrentUserFromClub(ctx, args.clubId);
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedIds: [membership._id],
+      type: ACTIVITY_TYPES.CLUB_LEFT,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          previousValue: membership.name,
+        },
+      ],
+    });
   },
 });
 
@@ -137,9 +168,32 @@ export const createClub = authenticatedMutationWithRLS()({
     await enforceRateLimit(ctx, "createClub", ctx.currentUser._id);
     await validateClubName(ctx, args.input.name, args.input.isPublic);
     const clubId = await dtoCreateClub(ctx, args.input);
-    await addCurrentUserToClub(ctx, clubId, {
-      joinAsAdmin: true,
+    await dtoCreateActivity(ctx, {
+      resourceId: clubId,
+      type: ACTIVITY_TYPES.CLUB_CREATED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          newValue: args.input.name,
+        },
+      ],
+    });
+    const { membershipInfo, membershipId } = await addCurrentUserToClub(ctx, clubId, {
+      isAdmin: true,
       membershipInfo: args.membershipInfo,
+    });
+    await dtoCreateActivity(ctx, {
+      resourceId: clubId,
+      relatedIds: [membershipId],
+      type: ACTIVITY_TYPES.CLUB_JOINED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          newValue: membershipInfo.name,
+        },
+      ],
     });
     return clubId;
   },
@@ -169,7 +223,14 @@ export const updateClub = authenticatedMutationWithRLS()({
     }
     // Validate permissions
     await enforceClubOwnershipOrAdmin(ctx, club);
-    return await dtoUpdateClub(ctx, args.clubId, args.input);
+    await dtoUpdateClub(ctx, args.clubId, args.input);
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      type: ACTIVITY_TYPES.CLUB_UPDATED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: getMetadata(club, args.input),
+    });
   },
 });
 
@@ -189,7 +250,18 @@ export const deleteClub = authenticatedMutationWithRLS()({
     await enforceClubOwnershipOrAdmin(ctx, club);
     // Get and delete all memberships within the current club
     await dtoDeleteAllClubMemberships(ctx, args.clubId);
-    return await ctx.db.delete(args.clubId);
+    await ctx.db.delete(args.clubId);
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      type: ACTIVITY_TYPES.CLUB_DELETED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          previousValue: club.name,
+        },
+      ],
+    });
   },
 });
 
@@ -213,7 +285,16 @@ export const updateClubMembership = authenticatedMutationWithRLS()({
     const club = await dtoGetClubOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
-    return await ctx.db.patch(args.membershipId, args.input);
+    await ctx.db.patch(args.membershipId, args.input);
+
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedIds: [membership._id],
+      type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: getMetadata(membership, args.input),
+    });
   },
 });
 
@@ -241,6 +322,19 @@ export const removeClubMember = authenticatedMutationWithRLS()({
 
     await ctx.db.delete(args.membershipId);
 
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedIds: [membership._id],
+      type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [
+        {
+          previousValue: membership.name,
+        },
+      ],
+    });
+
     // Decrement club member count
     if (club.numMembers > 0) {
       await dtoUpdateClub(ctx, membership.clubId, { numMembers: club.numMembers - 1 });
@@ -264,6 +358,18 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
     for (const membership of memberships) {
       if (!membership.isApproved) {
         await ctx.db.patch(membership._id, { isApproved: true });
+        await dtoCreateActivity(ctx, {
+          resourceId: membership.clubId,
+          relatedIds: [membership._id],
+          type: ACTIVITY_TYPES.CLUB_JOINED,
+          createdBy: ctx.currentUser._id,
+          createdAt: Date.now(),
+          metadata: [
+            {
+              newValue: membership.name,
+            },
+          ],
+        });
         approvedCount++;
       }
     }
@@ -291,12 +397,25 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
     // Remove all memberships (owner check already done in validation)
     for (const membership of memberships) {
       await ctx.db.delete(membership._id);
+      await dtoCreateActivity(ctx, {
+        resourceId: club._id,
+        relatedIds: [membership._id],
+        type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+        createdBy: ctx.currentUser._id,
+        createdAt: Date.now(),
+        metadata: [
+          {
+            previousValue: membership.name,
+          },
+        ],
+      });
     }
 
     const removedCount = memberships.length;
     if (removedCount > 0 && club.numMembers >= removedCount) {
       await dtoUpdateClub(ctx, club._id, { numMembers: club.numMembers - removedCount });
     }
+
     return removedCount;
   },
 });
@@ -327,12 +446,13 @@ export const listClubActivities = authenticatedQueryWithRLS()({
  * Removes the current authenticated user from a club and updates member count.
  * @param ctx Authenticated context with profile
  * @param clubId ID of the club to leave
+ * @returns The removed membership details
  * @throws Error when club doesn't exist or user is not a member
  */
 const removeCurrentUserFromClub = async (
   ctx: AuthenticatedWithProfileCtx,
   clubId: Id<"clubs">,
-): Promise<void> => {
+): Promise<ClubMembership> => {
   // Validate club exists
   const club = await dtoGetClubOrThrow(ctx, clubId);
   // Validate user not club owner
@@ -353,21 +473,25 @@ const removeCurrentUserFromClub = async (
   if (club.numMembers > 0) {
     await dtoUpdateClub(ctx, clubId, { numMembers: club.numMembers - 1 });
   }
+  return existingMembership;
 };
 
 /**
  * Adds the current authenticated user to a club with specified options and updates member count.
  * @param ctx Authenticated context with profile
  * @param clubId ID of the club to join
- * @param options Join options including admin status and membership info
+ * @param options Join options including admin status, approval status and membership info
  * @returns ID of the created club membership
  * @throws Error when club doesn't exist or user is already a member
  */
 const addCurrentUserToClub = async (
   ctx: AuthenticatedWithProfileCtx,
   clubId: Id<"clubs">,
-  options?: { joinAsAdmin?: boolean; membershipInfo?: ClubMembershipInput },
-): Promise<Id<"clubMemberships">> => {
+  options?: { isApproved?: boolean; isAdmin?: boolean; membershipInfo?: ClubMembershipInput },
+): Promise<{
+  membershipInfo: WithoutSystemFields<ClubMembership>;
+  membershipId: Id<"clubMemberships">;
+}> => {
   // Validate club exists
   const club = await dtoGetClubOrThrow(ctx, clubId);
   // Validate user is not already a member
@@ -379,20 +503,16 @@ const addCurrentUserToClub = async (
     throw new ConvexError(CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR);
   }
   // Add current user as member
-  const currentUserMembershipInfo = createClubMembershipInfo(
-    ctx.currentUser,
-    clubId,
-    options?.membershipInfo,
-  );
-  const membership = await ctx.db.insert("clubMemberships", {
-    ...currentUserMembershipInfo,
-    isApproved: options?.joinAsAdmin ? true : false,
-    isClubAdmin: options?.joinAsAdmin ? true : false,
+  const currentUserMembershipInfo = {
+    ...createClubMembershipInfo(ctx.currentUser, clubId, options?.membershipInfo),
+    isApproved: options?.isAdmin ? true : !!options?.isApproved,
+    isClubAdmin: !!options?.isAdmin,
     joinedAt: Date.now(),
-  });
+  };
+  const membershipId = await ctx.db.insert("clubMemberships", currentUserMembershipInfo);
   // Increment club member count
   await dtoUpdateClub(ctx, clubId, { numMembers: club.numMembers + 1 });
-  return membership;
+  return { membershipInfo: currentUserMembershipInfo, membershipId };
 };
 
 /**

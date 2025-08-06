@@ -4,20 +4,31 @@ import { zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
+export const resourceIdSchema = z.union([zid("clubs"), zid("clubMemberships"), zid("users")]);
+
 export const activitySchema = z.object({
-  resourceId: zid("clubs").or(zid("users")),
-  title: z.string().max(200, "Title must be less than 200 characters long."),
-  description: z.string().max(1000, "Description must be less than 1000 characters long."),
+  resourceId: resourceIdSchema,
+  relatedIds: z.array(resourceIdSchema).optional(),
   type: z.enum(activityTypes as [string, ...string[]]),
   createdBy: zid("users"),
   createdAt: z.number(),
+  metadata: z
+    .array(
+      z.object({
+        previousValue: z.string().optional(),
+        newValue: z.string().optional(),
+        fieldChanged: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export type Activity = DocumentByName<DataModel, "activities">;
 
 export const activityTable = defineTable(zodToConvex(activitySchema))
-  .index("resourceId", ["resourceId"])
-  .index("resourceCreatedAt", ["resourceId", "createdAt"]);
+  .index("resourceType", ["resourceId", "type"])
+  .index("resourceCreatedAt", ["resourceId", "createdAt"])
+  .index("createdBy", ["createdBy"]);
 
 export const activityTables = {
   activities: activityTable,

@@ -8,7 +8,6 @@ import {
   deleteActivitiesForResource,
   getActivity,
   listActivitiesForResource,
-  updateActivity,
 } from "../database";
 
 describe("Activity Database Service", () => {
@@ -82,19 +81,6 @@ describe("Activity Database Service", () => {
 
       expect(result).toBe(activityId);
       expect(mockCtx.db.insert).toHaveBeenCalledWith("activities", activity);
-    });
-  });
-
-  describe("updateActivity", () => {
-    it("patches existing activity", async () => {
-      const activityId = genId<"activities">("activities");
-      const updates = { title: "Updated Title" };
-
-      vi.mocked(mockCtx.db.patch).mockResolvedValueOnce(undefined);
-
-      await updateActivity(mockCtx, activityId, updates);
-
-      expect(mockCtx.db.patch).toHaveBeenCalledWith(activityId, updates);
     });
   });
 
