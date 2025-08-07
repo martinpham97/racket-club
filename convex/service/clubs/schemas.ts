@@ -16,7 +16,6 @@ export const clubSchema = z.object({
     .optional(),
   logo: z.string().optional(),
   banner: z.string().optional(),
-  type: z.enum(["social", "training"]),
   isPublic: z.boolean(),
   maxMembers: z
     .number()
@@ -51,6 +50,19 @@ export const clubMembershipSchema = z.object({
   isApproved: z.boolean(),
   isClubAdmin: z.boolean(),
   joinedAt: z.number(),
+});
+
+export const clubBanReasonSchema = z
+  .string()
+  .min(10, "Ban reason must be at least 10 characters.")
+  .max(500, "Ban reason must be less than 500 characters.");
+export const clubBanSchema = z.object({
+  clubId: zid("clubs"),
+  userId: zid("users"),
+  bannedBy: zid("users"),
+  bannedAt: z.number(),
+  reason: clubBanReasonSchema.optional(),
+  isActive: z.boolean(),
 });
 
 export const clubMembershipInputSchema = clubMembershipSchema.pick({
@@ -99,15 +111,6 @@ export const clubMembershipTable = defineTable(zodToConvex(clubMembershipSchema)
   .index("clubApproved", ["clubId", "isApproved"])
   .index("userId", ["userId"])
   .index("clubUser", ["clubId", "userId"]);
-
-export const clubBanSchema = z.object({
-  clubId: zid("clubs"),
-  userId: zid("users"),
-  bannedBy: zid("users"),
-  bannedAt: z.number(),
-  reason: z.string().max(500, "Ban reason must be less than 500 characters").optional(),
-  isActive: z.boolean(),
-});
 
 export const clubBanTable = defineTable(zodToConvex(clubBanSchema))
   .index("clubUser", ["clubId", "userId"])

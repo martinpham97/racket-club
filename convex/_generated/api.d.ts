@@ -9,10 +9,13 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as constants_activities from "../constants/activities.js";
 import type * as constants_errors from "../constants/errors.js";
-import type * as constants_rateLimit from "../constants/rateLimitConfig.js";
+import type * as constants_rateLimitConfig from "../constants/rateLimitConfig.js";
 import type * as http from "../http.js";
 import type * as myFunctions from "../myFunctions.js";
+import type * as service_activities_database from "../service/activities/database.js";
+import type * as service_activities_schemas from "../service/activities/schemas.js";
 import type * as service_clubs_database from "../service/clubs/database.js";
 import type * as service_clubs_functions from "../service/clubs/functions.js";
 import type * as service_clubs_schemas from "../service/clubs/schemas.js";
@@ -21,12 +24,19 @@ import type * as service_users_functions from "../service/users/functions.js";
 import type * as service_users_schemas from "../service/users/schemas.js";
 import type * as service_utils_database from "../service/utils/database.js";
 import type * as service_utils_functions from "../service/utils/functions.js";
+import type * as service_utils_metadata from "../service/utils/metadata.js";
 import type * as service_utils_pagination from "../service/utils/pagination.js";
 import type * as service_utils_rateLimit from "../service/utils/rateLimit.js";
 import type * as service_utils_validators_auth from "../service/utils/validators/auth.js";
+import type * as service_utils_validators_clubs from "../service/utils/validators/clubs.js";
+import type * as service_utils_validators_profile from "../service/utils/validators/profile.js";
 import type * as service_utils_validators_rateLimit from "../service/utils/validators/rateLimit.js";
 
-import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -38,10 +48,13 @@ import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server
  */
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  "constants/activities": typeof constants_activities;
   "constants/errors": typeof constants_errors;
-  "constants/rateLimit": typeof constants_rateLimit;
+  "constants/rateLimitConfig": typeof constants_rateLimitConfig;
   http: typeof http;
   myFunctions: typeof myFunctions;
+  "service/activities/database": typeof service_activities_database;
+  "service/activities/schemas": typeof service_activities_schemas;
   "service/clubs/database": typeof service_clubs_database;
   "service/clubs/functions": typeof service_clubs_functions;
   "service/clubs/schemas": typeof service_clubs_schemas;
@@ -50,14 +63,20 @@ declare const fullApi: ApiFromModules<{
   "service/users/schemas": typeof service_users_schemas;
   "service/utils/database": typeof service_utils_database;
   "service/utils/functions": typeof service_utils_functions;
+  "service/utils/metadata": typeof service_utils_metadata;
   "service/utils/pagination": typeof service_utils_pagination;
   "service/utils/rateLimit": typeof service_utils_rateLimit;
   "service/utils/validators/auth": typeof service_utils_validators_auth;
+  "service/utils/validators/clubs": typeof service_utils_validators_clubs;
+  "service/utils/validators/profile": typeof service_utils_validators_profile;
   "service/utils/validators/rateLimit": typeof service_utils_validators_rateLimit;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 
-export declare const api: FilterApi<typeof fullApiWithMounts, FunctionReference<any, "public">>;
+export declare const api: FilterApi<
+  typeof fullApiWithMounts,
+  FunctionReference<any, "public">
+>;
 export declare const internal: FilterApi<
   typeof fullApiWithMounts,
   FunctionReference<any, "internal">
@@ -97,7 +116,12 @@ export declare const components: {
         },
         { ok: true; retryAfter?: number } | { ok: false; retryAfter: number }
       >;
-      clearAll: FunctionReference<"mutation", "internal", { before?: number }, null>;
+      clearAll: FunctionReference<
+        "mutation",
+        "internal",
+        { before?: number },
+        null
+      >;
       getServerTime: FunctionReference<"mutation", "internal", {}, number>;
       getValue: FunctionReference<
         "query",

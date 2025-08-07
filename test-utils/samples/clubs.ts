@@ -9,7 +9,6 @@ export const createTestClubInput = (overrides?: Partial<ClubCreateInput>): ClubC
   return {
     name: `Test Club`,
     description: "Test club description",
-    type: "social",
     isPublic: true,
     maxMembers: 50,
     location: {

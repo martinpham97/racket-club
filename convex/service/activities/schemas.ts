@@ -13,24 +13,24 @@ export const resourceIdSchema = z.union([
 
 export type ResourceId = z.infer<typeof resourceIdSchema>;
 
+export const activityMetadataSchema = z.array(
+  z.object({
+    previousValue: z.string().optional(),
+    newValue: z.string().optional(),
+    fieldChanged: z.string().optional(),
+  }),
+);
 export const activitySchema = z.object({
   resourceId: resourceIdSchema,
   relatedId: resourceIdSchema.optional(),
   type: z.enum(activityTypes as [string, ...string[]]),
   createdBy: zid("users"),
   createdAt: z.number(),
-  metadata: z
-    .array(
-      z.object({
-        previousValue: z.string().optional(),
-        newValue: z.string().optional(),
-        fieldChanged: z.string().optional(),
-      }),
-    )
-    .optional(),
+  metadata: activityMetadataSchema.optional(),
 });
 
 export type Activity = DocumentByName<DataModel, "activities">;
+export type ActivityMetadata = z.infer<typeof activityMetadataSchema>;
 
 export const activityTable = defineTable(zodToConvex(activitySchema))
   .index("resourceType", ["resourceId", "type"])

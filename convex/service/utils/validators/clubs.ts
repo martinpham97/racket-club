@@ -1,12 +1,18 @@
-import { AUTH_ACCESS_DENIED_ERROR } from "@/convex/constants/errors";
+import { Id } from "@/convex/_generated/dataModel";
+import { QueryCtx } from "@/convex/_generated/server";
+import {
+  AUTH_ACCESS_DENIED_ERROR,
+  CLUB_FULL_ERROR,
+  CLUB_MEMBERSHIP_NOT_FOUND_ERROR,
+  CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR,
+  CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
+  CLUB_PUBLIC_UNAPPROVED_ERROR,
+} from "@/convex/constants/errors";
 import { getMyClubMembership } from "@/convex/service/clubs/database";
-import { Club } from "@/convex/service/clubs/schemas";
+import { Club, ClubMembership, ClubUpdateInput } from "@/convex/service/clubs/schemas";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { ConvexError } from "convex/values";
 import { isOwnerOrSystemAdmin } from "./auth";
-
-import { QueryCtx } from "@/convex/_generated/server";
-import { CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR } from "@/convex/constants/errors";
 
 /**
  * Enforces that the current user has permission to modify the club.
@@ -73,4 +79,89 @@ export const validateClubName = async (ctx: QueryCtx, name: string, isPublic: bo
       throw new ConvexError(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
     }
   }
+};
+
+/**
+ * Validates club name uniqueness if name or visibility is being updated.
+ * @param ctx - Authenticated context with profile
+ * @param input - Club update input data
+ * @param club - Current club data
+ * @throws ConvexError when name validation fails
+ */
+export const validateClubUpdateInput = async (
+  ctx: AuthenticatedWithProfileCtx,
+  input: ClubUpdateInput,
+  club: Club,
+) => {
+  // Check approval permission first
+  if (input.isApproved && !ctx.currentUser.profile.isAdmin) {
+    throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
+  }
+
+  // Check if we are updating club name or club visibility
+  const shouldValidateName = input.name || input.isPublic !== undefined;
+  if (!shouldValidateName) {
+    return;
+  }
+
+  // Infer values from existing club settings if not provided
+  const name = input.name ?? club.name;
+  const isPublic = input.isPublic ?? club.isPublic;
+  await validateClubName(ctx, name, isPublic);
+};
+
+/**
+ * Validates that a membership exists and throws an error if not.
+ * @param membership - The membership to validate
+ * @returns The validated membership
+ * @throws ConvexError when membership is null
+ */
+export const validateMembershipExists = (membership: ClubMembership | null): ClubMembership => {
+  if (!membership) {
+    throw new ConvexError(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
+  }
+  return membership;
+};
+
+/**
+ * Validates that a club can be joined by checking capacity and approval status.
+ * @param club - The club to validate
+ * @throws ConvexError when club is full or public but unapproved
+ */
+export const validateClubJoinability = (club: Club) => {
+  if (club.numMembers >= club.maxMembers) {
+    throw new ConvexError(CLUB_FULL_ERROR);
+  }
+  if (club.isPublic && !club.isApproved) {
+    throw new ConvexError(CLUB_PUBLIC_UNAPPROVED_ERROR);
+  }
+};
+
+/**
+ * Validates and returns memberships for bulk operations.
+ * Ensures all memberships exist, belong to the same club, and user has permissions.
+ * @param ctx - Authenticated context with profile
+ * @param membershipIds - Array of membership IDs to validate
+ * @returns Object containing validated memberships and club ID
+ * @throws ConvexError when memberships are from different clubs or user lacks permissions
+ */
+export const validateBulkMemberships = async (
+  ctx: AuthenticatedWithProfileCtx,
+  membershipIds: Id<"clubMemberships">[],
+): Promise<{ memberships: ClubMembership[]; clubId: Id<"clubs"> | null }> => {
+  if (membershipIds.length === 0) return { memberships: [], clubId: null };
+
+  const uniqueIds = [...new Set(membershipIds)];
+  const memberships = await Promise.all(uniqueIds.map((id) => ctx.db.get(id)));
+  const validMemberships = memberships.filter(Boolean) as ClubMembership[];
+
+  if (validMemberships.length === 0) return { memberships: [], clubId: null };
+
+  const clubId = validMemberships[0].clubId;
+  const allSameClub = validMemberships.every((m) => m.clubId === clubId);
+  if (!allSameClub) {
+    throw new ConvexError(CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR);
+  }
+
+  return { memberships: validMemberships, clubId };
 };

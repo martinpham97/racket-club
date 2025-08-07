@@ -3,6 +3,8 @@ import { Id } from "@/convex/_generated/dataModel";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
+  CLUB_CANNOT_BAN_OWNER_ERROR,
+  CLUB_CANNOT_BAN_SELF_ERROR,
   CLUB_FULL_ERROR,
   CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR,
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
@@ -12,18 +14,22 @@ import {
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
+  CLUB_USER_BANNED_ERROR,
+  CLUB_USER_NOT_BANNED_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
 import { ActivityTestHelpers, createTestActivity } from "@/test-utils/samples/activities";
 import {
   ClubTestHelpers,
   createTestClub,
+  createTestClubBan,
   createTestClubInput,
   createTestClubMembership,
 } from "@/test-utils/samples/clubs";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
 import { convexTest } from "convex-test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Activity } from "../../activities/schemas";
 
 vi.mock("@/convex/service/utils/validators/rateLimit", () => ({
   enforceRateLimit: vi.fn(),
@@ -151,6 +157,34 @@ describe("Club Functions", () => {
       expect(joinActivity?.createdBy).toBe(userId);
       expect(joinActivity?.resourceId).toBe(clubId);
       expect(joinActivity?.relatedId).toEqual(userId);
+    });
+
+    it("banned user cannot join", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const bannedUser = await userHelpers.insertUser("banned@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(bannedUser));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      await clubHelpers.insertClubBan(createTestClubBan(clubId, bannedUser, owner));
+
+      const asBannedUser = t.withIdentity({ subject: bannedUser });
+      await expect(
+        asBannedUser.mutation(api.service.clubs.functions.joinClub, {
+          clubId,
+        }),
+      ).rejects.toThrow(CLUB_USER_BANNED_ERROR);
     });
 
     it("throws when user already member", async () => {
@@ -1120,11 +1154,11 @@ describe("Club Functions", () => {
       expect(result).toBeDefined();
       expect(result.page).toBeDefined();
       expect(result.page).toHaveLength(2);
-      expect(result.page.some((a) => a.type === ACTIVITY_TYPES.CLUB_CREATED)).toBe(true);
-      expect(result.page.some((a) => a.type === ACTIVITY_TYPES.CLUB_UPDATED)).toBe(true);
+      expect(result.page.some((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_CREATED)).toBe(true);
+      expect(result.page.some((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_UPDATED)).toBe(true);
 
       // Validate resourceId all activities
-      result.page.forEach((activity) => {
+      result.page.forEach((activity: Activity) => {
         expect(activity.resourceId).toBe(clubId);
       });
     });
@@ -1160,6 +1194,246 @@ describe("Club Functions", () => {
           pagination: { cursor: null, numItems: 10 },
         }),
       ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+  });
+
+  describe("banClubMember", () => {
+    it("successfully bans a member", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const member = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(member));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+      const memberMembership = await clubHelpers.insertMembership({
+        clubId,
+        userId: member,
+        name: "Member",
+        isApproved: true,
+        isClubAdmin: false,
+        joinedAt: Date.now(),
+      });
+
+      const asOwner = t.withIdentity({ subject: owner });
+      await asOwner.mutation(api.service.clubs.functions.banClubMember, {
+        membershipId: memberMembership,
+        reason: "Inappropriate behavior",
+      });
+
+      const removedMembership = await clubHelpers.getMembership(memberMembership);
+      expect(removedMembership).toBeNull();
+
+      const ban = await clubHelpers.getActiveBanForUser(clubId, member);
+      expect(ban).toBeTruthy();
+      expect(ban?.reason).toBe("Inappropriate behavior");
+      expect(ban?.bannedBy).toBe(owner);
+      expect(ban?.isActive).toBe(true);
+
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const banActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_BANNED);
+      expect(banActivity).toBeTruthy();
+      expect(banActivity?.relatedId).toBe(member);
+    });
+
+    it("cannot ban club owner", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const admin = await userHelpers.insertUser("admin@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(admin));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      const ownerMembership = await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: admin,
+        name: "Admin",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      const asAdmin = t.withIdentity({ subject: admin });
+      await expect(
+        asAdmin.mutation(api.service.clubs.functions.banClubMember, {
+          membershipId: ownerMembership,
+          reason: "Test ban reason",
+        }),
+      ).rejects.toThrow(CLUB_CANNOT_BAN_OWNER_ERROR);
+    });
+
+    it("cannot ban self", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const member = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(member));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      const memberMembership = await clubHelpers.insertMembership({
+        clubId,
+        userId: member,
+        name: "Member",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      const asMember = t.withIdentity({ subject: member });
+      await expect(
+        asMember.mutation(api.service.clubs.functions.banClubMember, {
+          membershipId: memberMembership,
+          reason: "Test ban reason",
+        }),
+      ).rejects.toThrow(CLUB_CANNOT_BAN_SELF_ERROR);
+    });
+
+    it("throws when membership not found", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      await userHelpers.insertProfile(createTestProfile(owner));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      const membershipId = await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+      await clubHelpers.deleteClubMembership(membershipId);
+
+      const asOwner = t.withIdentity({ subject: owner });
+      await expect(
+        asOwner.mutation(api.service.clubs.functions.banClubMember, {
+          membershipId,
+          reason: "Test ban reason",
+        }),
+      ).rejects.toThrow(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
+    });
+  });
+
+  describe("unbanClubMember", () => {
+    it("successfully unbans a member", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const member = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(member));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      const ban = await clubHelpers.insertClubBan(createTestClubBan(clubId, member, owner));
+
+      const asOwner = t.withIdentity({ subject: owner });
+      await asOwner.mutation(api.service.clubs.functions.unbanClubMember, {
+        clubId,
+        userId: member,
+      });
+
+      const updatedBan = await clubHelpers.getClubBan(ban);
+      expect(updatedBan?.isActive).toBe(false);
+
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const unbanActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED);
+      expect(unbanActivity).toBeTruthy();
+      expect(unbanActivity?.relatedId).toBe(member);
+    });
+
+    it("fails when user is not banned", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const member = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(member));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      const asOwner = t.withIdentity({ subject: owner });
+      await expect(
+        asOwner.mutation(api.service.clubs.functions.unbanClubMember, {
+          clubId,
+          userId: member,
+        }),
+      ).rejects.toThrow(CLUB_USER_NOT_BANNED_ERROR);
+    });
+  });
+
+  describe("listClubBans", () => {
+    it("returns active bans for club", async () => {
+      const owner = await userHelpers.insertUser("owner@example.com");
+      const bannedUser1 = await userHelpers.insertUser("banned1@example.com");
+      const bannedUser2 = await userHelpers.insertUser("banned2@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(bannedUser1));
+      await userHelpers.insertProfile(createTestProfile(bannedUser2));
+
+      const club = createTestClub(owner);
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.insertMembership({
+        clubId,
+        userId: owner,
+        name: "Owner",
+        isApproved: true,
+        isClubAdmin: true,
+        joinedAt: Date.now(),
+      });
+
+      await clubHelpers.insertClubBan(
+        createTestClubBan(clubId, bannedUser1, owner, { isActive: true }),
+      );
+      await clubHelpers.insertClubBan(
+        createTestClubBan(clubId, bannedUser2, owner, { isActive: false }),
+      );
+
+      const asOwner = t.withIdentity({ subject: owner });
+      const result = await asOwner.query(api.service.clubs.functions.listClubBans, {
+        clubId,
+        pagination: { cursor: null, numItems: 10 },
+      });
+
+      expect(result.page).toHaveLength(1);
+      expect(result.page[0].userId).toBe(bannedUser1);
+      expect(result.page[0].isActive).toBe(true);
     });
   });
 });
