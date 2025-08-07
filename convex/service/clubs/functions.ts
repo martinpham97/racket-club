@@ -107,6 +107,7 @@ export const joinClub = authenticatedMutationWithRLS()({
     if (club.numMembers >= club.maxMembers) {
       throw new ConvexError(CLUB_FULL_ERROR);
     }
+    // Users can only join private or approved public clubs
     if (club.isPublic && !club.isApproved) {
       throw new ConvexError(CLUB_PUBLIC_UNAPPROVED_ERROR);
     }
@@ -216,14 +217,18 @@ export const updateClub = authenticatedMutationWithRLS()({
     await enforceRateLimit(ctx, "updateClub", rateLimitKey);
     // Validate club exists
     const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    // Validate permissions
+    await enforceClubOwnershipOrAdmin(ctx, club);
     // Validate club name when name or isPublic is being updated
     if (args.input.name || args.input.isPublic !== undefined) {
       const name = args.input.name ?? club.name;
       const isPublic = args.input.isPublic ?? club.isPublic;
       await validateClubName(ctx, name, isPublic);
     }
-    // Validate permissions
-    await enforceClubOwnershipOrAdmin(ctx, club);
+    // Validate isApproved can only be modified by system admin
+    if (args.input.isApproved && !ctx.currentUser.profile.isAdmin) {
+      throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
+    }
     await dtoUpdateClub(ctx, args.clubId, args.input);
     await dtoCreateActivity(ctx, {
       resourceId: args.clubId,

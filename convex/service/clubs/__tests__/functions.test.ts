@@ -232,6 +232,47 @@ describe("Club Functions", () => {
         }),
       ).resolves.toBeDefined();
     });
+
+    it("throws when club is at max capacity", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      await userHelpers.insertProfile(createTestProfile(userId));
+
+      const club = createTestClub(ownerId, { maxMembers: 1, numMembers: 1 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.joinClub, {
+          clubId,
+          membershipInfo: { name: "Test User" },
+        }),
+      ).rejects.toThrow(CLUB_FULL_ERROR);
+    });
+
+    it("throws when user already has membership", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      await userHelpers.insertProfile(createTestProfile(userId));
+
+      const club = createTestClub(ownerId, { isApproved: true });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      await clubHelpers.insertMembership(membership);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.joinClub, {
+          clubId,
+          membershipInfo: { name: "Test User" },
+        }),
+      ).rejects.toThrow(CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR);
+    });
   });
 
   describe("leaveClub", () => {
@@ -291,6 +332,22 @@ describe("Club Functions", () => {
       await expect(
         asUser.mutation(api.service.clubs.functions.leaveClub, { clubId }),
       ).rejects.toThrow(CLUB_OWNER_CANNOT_LEAVE_ERROR);
+    });
+
+    it("throws when non-member tries to leave", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("outsider@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      await userHelpers.insertProfile(createTestProfile(userId));
+
+      const club = createTestClub(ownerId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.leaveClub, { clubId }),
+      ).rejects.toThrow(CLUB_MEMBERSHIP_REQUIRED_ERROR);
     });
   });
 
@@ -528,6 +585,124 @@ describe("Club Functions", () => {
       await clubHelpers.insertMembership(membership);
 
       const input = { name: "Unauthorized Update" };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+
+    it("throws when updating name to duplicate public club name", async () => {
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+
+      const existingClub = createTestClub(userId, { isPublic: true, name: "Existing Public Club" });
+      await clubHelpers.insertClub(existingClub);
+
+      const club = createTestClub(userId, { isPublic: true, name: "My Club" });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { name: "Existing Public Club" };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).rejects.toThrow(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
+    });
+
+    it("allows updating name when changing from public to private", async () => {
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+
+      const existingClub = createTestClub(userId, { isPublic: true, name: "Duplicate Name" });
+      await clubHelpers.insertClub(existingClub);
+
+      const club = createTestClub(userId, { isPublic: true, name: "My Club" });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { name: "Duplicate Name", isPublic: false };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).resolves.toBeDefined();
+    });
+
+    it("allows updating skill levels with min = max", async () => {
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { skillLevels: { min: 3, max: 3 } };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).resolves.toBeDefined();
+    });
+
+    it("validates name correctly when only changing isPublic flag", async () => {
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+
+      const existingClub = createTestClub(userId, { isPublic: true, name: "Test Club" });
+      await clubHelpers.insertClub(existingClub);
+
+      const club = createTestClub(userId, { isPublic: false, name: "Test Club" });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { isPublic: true };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).rejects.toThrow(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
+    });
+
+    it("throws when non-admin tries to update isApproved", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { isApproved: true };
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+
+    it("allows admin to update isApproved", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const adminId = await userHelpers.insertUser("admin@example.com");
+      await userHelpers.insertProfile(createTestProfile(adminId, { isAdmin: true }));
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { isApproved: true };
+      const asAdmin = t.withIdentity({ subject: adminId });
+      await expect(
+        asAdmin.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
+      ).resolves.toBeDefined();
+    });
+
+    it("denies access for non-system-admin to modify approval status", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("admin@example.com");
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+
+      const club = createTestClub(ownerId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId, {
+        name: "Club Admin",
+        isClubAdmin: true,
+      });
+      await clubHelpers.insertMembership(membership);
+
+      const input = { name: "Admin Updated Name", isApproved: true };
       const asUser = t.withIdentity({ subject: userId });
       await expect(
         asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
@@ -800,105 +975,7 @@ describe("Club Functions", () => {
         }),
       ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
     });
-  });
 
-  describe("joinClub edge cases", () => {
-    it("throws when club is at max capacity", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
-
-      await userHelpers.insertProfile(createTestProfile(ownerId));
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club = createTestClub(ownerId, { maxMembers: 1, numMembers: 1 });
-      const clubId = await clubHelpers.insertClub(club);
-
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
-          clubId,
-          membershipInfo: { name: "Test User" },
-        }),
-      ).rejects.toThrow(CLUB_FULL_ERROR);
-    });
-
-    it("throws when trying to join unapproved public club", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
-
-      await userHelpers.insertProfile(createTestProfile(ownerId));
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club = createTestClub(ownerId, { isPublic: true, isApproved: false });
-      const clubId = await clubHelpers.insertClub(club);
-
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
-          clubId,
-          membershipInfo: { name: "Test User" },
-        }),
-      ).rejects.toThrow(CLUB_PUBLIC_UNAPPROVED_ERROR);
-    });
-
-    it("throws when user already has membership", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
-
-      await userHelpers.insertProfile(createTestProfile(ownerId));
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club = createTestClub(ownerId, { isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
-
-      const membership = createTestClubMembership(clubId, userId);
-      await clubHelpers.insertMembership(membership);
-
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
-          clubId,
-          membershipInfo: { name: "Test User" },
-        }),
-      ).rejects.toThrow(CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR);
-    });
-  });
-
-  describe("leaveClub edge cases", () => {
-    it("throws when owner tries to leave club", async () => {
-      const userId = await userHelpers.insertUser();
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
-
-      const membership = createTestClubMembership(clubId, userId, { isClubAdmin: true });
-      await clubHelpers.insertMembership(membership);
-
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.leaveClub, { clubId }),
-      ).rejects.toThrow(CLUB_OWNER_CANNOT_LEAVE_ERROR);
-    });
-
-    it("throws when non-member tries to leave", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("outsider@example.com");
-
-      await userHelpers.insertProfile(createTestProfile(ownerId));
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
-
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.leaveClub, { clubId }),
-      ).rejects.toThrow(CLUB_MEMBERSHIP_REQUIRED_ERROR);
-    });
-  });
-
-  describe("removeClubMember edge cases", () => {
     it("throws when trying to remove club owner", async () => {
       const ownerId = await userHelpers.insertUser("owner@example.com");
       const adminId = await userHelpers.insertUser("admin@example.com");
@@ -940,188 +1017,6 @@ describe("Club Functions", () => {
           membershipId,
         }),
       ).rejects.toThrow(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
-    });
-  });
-
-  describe("listPublicClubs", () => {
-    it("returns only public and approved clubs", async () => {
-      const userId = await userHelpers.insertUser();
-
-      const publicApproved = createTestClub(userId, { isPublic: true, isApproved: true });
-      const publicUnapproved = createTestClub(userId, { isPublic: true, isApproved: false });
-      const privateApproved = createTestClub(userId, { isPublic: false, isApproved: true });
-
-      await clubHelpers.insertClub(publicApproved);
-      await clubHelpers.insertClub(publicUnapproved);
-      await clubHelpers.insertClub(privateApproved);
-
-      const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        pagination: { cursor: null, numItems: 10 },
-      });
-
-      expect(result.page).toHaveLength(1);
-      expect(result.page[0].isPublic).toBe(true);
-      expect(result.page[0].isApproved).toBe(true);
-    });
-
-    it("handles pagination correctly", async () => {
-      const userId = await userHelpers.insertUser();
-
-      for (let i = 0; i < 5; i++) {
-        const club = createTestClub(userId, {
-          isPublic: true,
-          isApproved: true,
-          name: `Club ${i}`,
-        });
-        await clubHelpers.insertClub(club);
-      }
-
-      const result = await t.query(api.service.clubs.functions.listPublicClubs, {
-        pagination: { cursor: null, numItems: 3 },
-      });
-
-      expect(result.page).toHaveLength(3);
-      expect(result.isDone).toBe(false);
-    });
-  });
-
-  describe("listMyClubs", () => {
-    it("returns clubs user is member of", async () => {
-      const userId = await userHelpers.insertUser();
-      const otherUserId = await userHelpers.insertUser("other@example.com");
-
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const myClub = createTestClub(userId);
-      const otherClub = createTestClub(otherUserId);
-
-      const myClubId = await clubHelpers.insertClub(myClub);
-      const otherClubId = await clubHelpers.insertClub(otherClub);
-
-      const myMembership = createTestClubMembership(myClubId, userId);
-      const otherMembership = createTestClubMembership(otherClubId, userId);
-
-      await clubHelpers.insertMembership(myMembership);
-      await clubHelpers.insertMembership(otherMembership);
-
-      const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        pagination: { cursor: null, numItems: 10 },
-      });
-
-      expect(result.page).toHaveLength(2);
-      expect(result.page.every((club) => club.membership)).toBe(true);
-    });
-
-    it("returns empty list for user with no memberships", async () => {
-      const userId = await userHelpers.insertUser();
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        pagination: { cursor: null, numItems: 10 },
-      });
-
-      expect(result.page).toHaveLength(0);
-    });
-
-    it("filters out memberships for deleted clubs", async () => {
-      const userId = await userHelpers.insertUser();
-      await userHelpers.insertProfile(createTestProfile(userId));
-
-      const club1 = createTestClub(userId);
-      const club2 = createTestClub(userId);
-
-      const clubId1 = await clubHelpers.insertClub(club1);
-      const clubId2 = await clubHelpers.insertClub(club2);
-
-      const membership1 = createTestClubMembership(clubId1, userId);
-      const membership2 = createTestClubMembership(clubId2, userId);
-
-      await clubHelpers.insertMembership(membership1);
-      await clubHelpers.insertMembership(membership2);
-
-      // Delete one club but leave membership
-      await clubHelpers.deleteClub(clubId1);
-
-      const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
-        pagination: { cursor: null, numItems: 10 },
-      });
-
-      expect(result.page).toHaveLength(1);
-      expect(result.page[0]._id).toBe(clubId2);
-    });
-  });
-
-  describe("updateClub", () => {
-    it("throws when updating name to duplicate public club name", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      await userHelpers.insertProfile(profile);
-
-      const existingClub = createTestClub(userId, { isPublic: true, name: "Existing Public Club" });
-      await clubHelpers.insertClub(existingClub);
-
-      const club = createTestClub(userId, { isPublic: true, name: "My Club" });
-      const clubId = await clubHelpers.insertClub(club);
-
-      const input = { name: "Existing Public Club" };
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
-      ).rejects.toThrow(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
-    });
-
-    it("allows updating name when changing from public to private", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      await userHelpers.insertProfile(profile);
-
-      const existingClub = createTestClub(userId, { isPublic: true, name: "Duplicate Name" });
-      await clubHelpers.insertClub(existingClub);
-
-      const club = createTestClub(userId, { isPublic: true, name: "My Club" });
-      const clubId = await clubHelpers.insertClub(club);
-
-      const input = { name: "Duplicate Name", isPublic: false };
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
-      ).resolves.toBeDefined();
-    });
-
-    it("allows updating skill levels with min = max", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      await userHelpers.insertProfile(profile);
-      const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
-
-      const input = { skillLevels: { min: 3, max: 3 } };
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
-      ).resolves.toBeDefined();
-    });
-
-    it("validates name correctly when only changing isPublic flag", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      await userHelpers.insertProfile(profile);
-
-      const existingClub = createTestClub(userId, { isPublic: true, name: "Test Club" });
-      await clubHelpers.insertClub(existingClub);
-
-      const club = createTestClub(userId, { isPublic: false, name: "Test Club" });
-      const clubId = await clubHelpers.insertClub(club);
-
-      // Should fail when changing private club to public with existing name
-      const input = { isPublic: true };
-      const asUser = t.withIdentity({ subject: userId });
-      await expect(
-        asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
-      ).rejects.toThrow(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
     });
   });
 

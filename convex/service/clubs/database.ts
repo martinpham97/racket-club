@@ -6,7 +6,7 @@ import { CLUB_NOT_FOUND_ERROR } from "@/convex/constants/errors";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { PaginationOptions, PaginationResult } from "convex/server";
 import { ConvexError } from "convex/values";
-import { Club, ClubCreateInput, ClubMembership, ClubUpdateInput, MyClub } from "./schemas";
+import { Club, ClubCreateInput, ClubMembership, MyClub } from "./schemas";
 
 /**
  * Gets a club by its ID.
@@ -114,7 +114,7 @@ export const createClub = async (
 export const updateClub = async (
   ctx: AuthenticatedWithProfileCtx,
   clubId: Id<"clubs">,
-  input: ClubUpdateInput,
+  input: Partial<Club>,
 ): Promise<void> => {
   return await ctx.db.patch(clubId, input);
 };

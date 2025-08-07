@@ -79,8 +79,4 @@ export class UserTestHelpers {
   async getProfile(profileId: Id<"userProfiles">) {
     return await this.t.run(async (ctx) => ctx.db.get(profileId));
   }
-
-  async deleteProfile(profileId: Id<"userProfiles">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(profileId));
-  }
 }
