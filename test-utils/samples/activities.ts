@@ -1,7 +1,7 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import schema from "@/convex/schema";
-import { Activity } from "@/convex/service/activities/schemas";
+import { Activity, ResourceId } from "@/convex/service/activities/schemas";
 import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
@@ -37,11 +37,11 @@ export class ActivityTestHelpers {
     });
   }
 
-  async getActivitiesForClub(clubId: Id<"clubs">) {
+  async getActivitiesForResource(resourceId: ResourceId) {
     return await this.t.run(async (ctx) =>
       ctx.db
         .query("activities")
-        .withIndex("resourceCreatedAt", (q) => q.eq("resourceId", clubId))
+        .withIndex("resourceCreatedAt", (q) => q.eq("resourceId", resourceId))
         .order("desc")
         .collect(),
     );

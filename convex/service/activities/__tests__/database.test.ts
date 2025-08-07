@@ -8,6 +8,7 @@ import {
   deleteActivitiesForResource,
   getActivity,
   listActivitiesForResource,
+  listActivitiesForUser,
 } from "../database";
 
 describe("Activity Database Service", () => {
@@ -81,6 +82,52 @@ describe("Activity Database Service", () => {
 
       expect(result).toBe(activityId);
       expect(mockCtx.db.insert).toHaveBeenCalledWith("activities", activity);
+    });
+  });
+
+  describe("listActivitiesForUser", () => {
+    it("returns paginated activities for user", async () => {
+      const userId = genId<"users">("users");
+      const paginationOpts = { cursor: null, numItems: 10 };
+      const activities = [createTestActivityRecord(), createTestActivityRecord()];
+      const paginatedResult = { page: activities, isDone: true, continueCursor: null };
+
+      const mockQuery = {
+        withIndex: vi.fn(() => ({
+          order: vi.fn(() => ({
+            paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
+          })),
+        })),
+      };
+      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
+        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
+      );
+
+      const result = await listActivitiesForUser(mockCtx, userId, paginationOpts);
+
+      expect(result).toEqual(paginatedResult);
+      expect(mockCtx.db.query).toHaveBeenCalledWith("activities");
+      expect(mockQuery.withIndex).toHaveBeenCalledWith("relatedId", expect.any(Function));
+    });
+
+    it("orders activities by descending date", async () => {
+      const userId = genId<"users">("users");
+      const paginationOpts = { cursor: null, numItems: 5 };
+      const paginatedResult = { page: [], isDone: true, continueCursor: null };
+
+      const mockOrder = vi.fn(() => ({
+        paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
+      }));
+      const mockQuery = {
+        withIndex: vi.fn(() => ({ order: mockOrder })),
+      };
+      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
+        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
+      );
+
+      await listActivitiesForUser(mockCtx, userId, paginationOpts);
+
+      expect(mockOrder).toHaveBeenCalledWith("desc");
     });
   });
 

@@ -1,10 +1,12 @@
 import { api } from "@/convex/_generated/api";
+import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   USER_PROFILE_ALREADY_EXISTS_ERROR,
   USER_PROFILE_REQUIRED_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
+import { ActivityTestHelpers } from "@/test-utils/samples/activities";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
 import { convexTest } from "convex-test";
 import { describe, expect, it, vi } from "vitest";
@@ -16,6 +18,7 @@ vi.mock("@/convex/service/utils/validators/rateLimit", () => ({
 describe("User Functions", () => {
   const t = convexTest(schema);
   const helpers = new UserTestHelpers(t);
+  const activityHelpers = new ActivityTestHelpers(t);
 
   describe("getCurrentUser", () => {
     it("returns null when not authenticated", async () => {
@@ -43,11 +46,22 @@ describe("User Functions", () => {
       const args = { userId, firstName: profile.firstName, lastName: profile.lastName };
       const asUser = t.withIdentity({ subject: userId });
 
-      const result = await asUser.mutation(api.service.users.functions.createUserProfile, args);
+      const profileId = await asUser.mutation(api.service.users.functions.createUserProfile, args);
 
-      expect(result).toBeDefined();
-      const createdProfile = await helpers.getProfile(result);
+      expect(profileId).toBeDefined();
+      const createdProfile = await helpers.getProfile(profileId);
       expect(createdProfile).toEqual(expect.objectContaining(profile));
+
+      // Validate profile creation activity was created
+      const activities = await activityHelpers.getActivitiesForResource(profileId);
+      expect(activities).toHaveLength(1);
+      expect(activities[0]).toEqual(
+        expect.objectContaining({
+          resourceId: profileId,
+          type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
+          createdBy: userId,
+        }),
+      );
     });
 
     it("allows admin to create profile for any user", async () => {
@@ -69,10 +83,10 @@ describe("User Functions", () => {
       };
       const asAdmin = t.withIdentity({ subject: adminId });
 
-      const result = await asAdmin.mutation(api.service.users.functions.createUserProfile, args);
+      const profileId = await asAdmin.mutation(api.service.users.functions.createUserProfile, args);
 
-      expect(result).toBeDefined();
-      const createdProfile = await helpers.getProfile(result);
+      expect(profileId).toBeDefined();
+      const createdProfile = await helpers.getProfile(profileId);
       expect(createdProfile).toEqual(expect.objectContaining(profile));
     });
 
@@ -117,6 +131,13 @@ describe("User Functions", () => {
 
       const updatedProfile = await helpers.getProfile(profileId);
       expect(updatedProfile).toEqual(expect.objectContaining({ ...profile, firstName: "Updated" }));
+
+      // Validate profile update activity was created
+      const activities = await activityHelpers.getActivitiesForResource(profileId);
+      const updateActivity = activities.find((a) => a.type === ACTIVITY_TYPES.USER_PROFILE_UPDATED);
+      expect(updateActivity).toBeDefined();
+      expect(updateActivity?.createdBy).toBe(userId);
+      expect(updateActivity?.resourceId).toBe(profileId);
     });
 
     it("allows admin to update any profile", async () => {
@@ -220,6 +241,81 @@ describe("User Functions", () => {
       await expect(
         asUser.mutation(api.service.users.functions.updateUserProfile, args),
       ).rejects.toThrow(USER_PROFILE_REQUIRED_ERROR);
+    });
+  });
+
+  describe("listUserActivities", () => {
+    it("returns user activities when user requests their own", async () => {
+      const userId = await helpers.insertUser();
+      const profile = createTestProfile(userId);
+      const profileId = await helpers.insertProfile(profile);
+
+      // Insert test activities
+      await activityHelpers.insertActivity({
+        resourceId: profileId,
+        relatedId: userId,
+        type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
+        createdBy: userId,
+        createdAt: Date.now(),
+      });
+      await activityHelpers.insertActivity({
+        resourceId: profileId,
+        relatedId: userId,
+        type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
+        createdBy: userId,
+        createdAt: Date.now(),
+      });
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.query(api.service.users.functions.listUserActivities, {
+        userId,
+        pagination: { cursor: null, numItems: 10 },
+      });
+
+      expect(result).toBeDefined();
+      expect(result.page).toHaveLength(2);
+      expect(result.page.some((a) => a.type === ACTIVITY_TYPES.USER_PROFILE_CREATED)).toBe(true);
+      expect(result.page.some((a) => a.type === ACTIVITY_TYPES.USER_PROFILE_UPDATED)).toBe(true);
+    });
+
+    it("throws when non-admin user tries to access another user's activities", async () => {
+      const userId = await helpers.insertUser("user@example.com");
+      const otherUserId = await helpers.insertUser("other@example.com");
+      await helpers.insertProfile(createTestProfile(userId));
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.query(api.service.users.functions.listUserActivities, {
+          userId: otherUserId,
+          pagination: { cursor: null, numItems: 10 },
+        }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+
+    it("allows admin to access any user's activities", async () => {
+      const adminId = await helpers.insertUser("admin@example.com");
+      const userId = await helpers.insertUser("user@example.com");
+      await helpers.insertProfile(createTestProfile(adminId, { isAdmin: true }));
+      const profileId = await helpers.insertProfile(createTestProfile(userId));
+
+      await activityHelpers.insertActivity({
+        resourceId: profileId,
+        relatedId: userId,
+        type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
+        createdBy: userId,
+        createdAt: Date.now(),
+      });
+
+      const asAdmin = t.withIdentity({ subject: adminId });
+      const result = await asAdmin.query(api.service.users.functions.listUserActivities, {
+        userId,
+        pagination: { cursor: null, numItems: 10 },
+      });
+
+      expect(result).toBeDefined();
+      expect(result.page).toHaveLength(1);
+      expect(result.page[0].resourceId).toBe(profileId);
+      expect(result.page[0].relatedId).toBe(userId);
     });
   });
 });

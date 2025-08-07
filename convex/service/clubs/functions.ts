@@ -110,13 +110,13 @@ export const joinClub = authenticatedMutationWithRLS()({
     if (club.isPublic && !club.isApproved) {
       throw new ConvexError(CLUB_PUBLIC_UNAPPROVED_ERROR);
     }
-    const { membershipInfo, membershipId } = await addCurrentUserToClub(ctx, args.clubId, {
+    const { membershipInfo } = await addCurrentUserToClub(ctx, args.clubId, {
       membershipInfo: createClubMembershipInfo(ctx.currentUser, args.clubId, args.membershipInfo),
       isApproved: false,
     });
     await dtoCreateActivity(ctx, {
       resourceId: club._id,
-      relatedIds: [membershipId],
+      relatedId: membershipInfo.userId,
       type: ACTIVITY_TYPES.CLUB_JOIN_REQUEST,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -142,7 +142,7 @@ export const leaveClub = authenticatedMutationWithRLS()({
     const membership = await removeCurrentUserFromClub(ctx, args.clubId);
     await dtoCreateActivity(ctx, {
       resourceId: args.clubId,
-      relatedIds: [membership._id],
+      relatedId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_LEFT,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -170,6 +170,7 @@ export const createClub = authenticatedMutationWithRLS()({
     const clubId = await dtoCreateClub(ctx, args.input);
     await dtoCreateActivity(ctx, {
       resourceId: clubId,
+      relatedId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_CREATED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -179,13 +180,13 @@ export const createClub = authenticatedMutationWithRLS()({
         },
       ],
     });
-    const { membershipInfo, membershipId } = await addCurrentUserToClub(ctx, clubId, {
+    const { membershipInfo } = await addCurrentUserToClub(ctx, clubId, {
       isAdmin: true,
       membershipInfo: args.membershipInfo,
     });
     await dtoCreateActivity(ctx, {
       resourceId: clubId,
-      relatedIds: [membershipId],
+      relatedId: membershipInfo.userId,
       type: ACTIVITY_TYPES.CLUB_JOINED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -226,6 +227,7 @@ export const updateClub = authenticatedMutationWithRLS()({
     await dtoUpdateClub(ctx, args.clubId, args.input);
     await dtoCreateActivity(ctx, {
       resourceId: args.clubId,
+      relatedId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_UPDATED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -253,6 +255,7 @@ export const deleteClub = authenticatedMutationWithRLS()({
     await ctx.db.delete(args.clubId);
     await dtoCreateActivity(ctx, {
       resourceId: args.clubId,
+      relatedId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_DELETED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -289,7 +292,7 @@ export const updateClubMembership = authenticatedMutationWithRLS()({
 
     await dtoCreateActivity(ctx, {
       resourceId: club._id,
-      relatedIds: [membership._id],
+      relatedId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -324,7 +327,7 @@ export const removeClubMember = authenticatedMutationWithRLS()({
 
     await dtoCreateActivity(ctx, {
       resourceId: club._id,
-      relatedIds: [membership._id],
+      relatedId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       createdBy: ctx.currentUser._id,
       createdAt: Date.now(),
@@ -360,7 +363,7 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
         await ctx.db.patch(membership._id, { isApproved: true });
         await dtoCreateActivity(ctx, {
           resourceId: membership.clubId,
-          relatedIds: [membership._id],
+          relatedId: membership.userId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
           createdBy: ctx.currentUser._id,
           createdAt: Date.now(),
@@ -399,7 +402,7 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
       await ctx.db.delete(membership._id);
       await dtoCreateActivity(ctx, {
         resourceId: club._id,
-        relatedIds: [membership._id],
+        relatedId: membership.userId,
         type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
         createdBy: ctx.currentUser._id,
         createdAt: Date.now(),

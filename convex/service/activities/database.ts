@@ -4,7 +4,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { QueryCtx } from "@/convex/_generated/server";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { PaginationOptions, PaginationResult, WithoutSystemFields } from "convex/server";
-import { Activity } from "./schemas";
+import { Activity, ResourceId } from "./schemas";
 
 /**
  * Gets an activity by its ID.
@@ -24,16 +24,35 @@ export const getActivity = async (
  * @param ctx Query context
  * @param resourceId Resource ID to get activities for
  * @param paginationOpts Pagination options
- * @returns Paginated result of club activities
+ * @returns Paginated result of resource activities
  */
 export const listActivitiesForResource = async (
   ctx: QueryCtx,
-  resourceId: Id<"clubs"> | Id<"users">,
+  resourceId: ResourceId,
   paginationOpts: PaginationOptions,
 ): Promise<PaginationResult<Activity>> => {
   return await ctx.db
     .query("activities")
     .withIndex("resourceCreatedAt", (q) => q.eq("resourceId", resourceId))
+    .order("desc")
+    .paginate(paginationOpts);
+};
+
+/**
+ * Lists activities for a user with pagination.
+ * @param ctx Query context
+ * @param userId User ID to get activities for
+ * @param paginationOpts Pagination options
+ * @returns Paginated result of user activities
+ */
+export const listActivitiesForUser = async (
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  paginationOpts: PaginationOptions,
+): Promise<PaginationResult<Activity>> => {
+  return await ctx.db
+    .query("activities")
+    .withIndex("relatedId", (q) => q.eq("relatedId", userId))
     .order("desc")
     .paginate(paginationOpts);
 };
@@ -58,7 +77,7 @@ export const createActivity = async (
  */
 export const deleteActivitiesForResource = async (
   ctx: AuthenticatedWithProfileCtx,
-  resourceId: Id<"clubs"> | Id<"users">,
+  resourceId: ResourceId,
 ): Promise<void> => {
   const activities = await ctx.db
     .query("activities")

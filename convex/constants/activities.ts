@@ -8,6 +8,7 @@ export const ACTIVITY_TYPES = {
   CLUB_MEMBERSHIP_REMOVED: "club:membership-removed",
   CLUB_MEMBERSHIP_UPDATED: "club:membership-updated",
   USER_CREATED: "user:created",
+  USER_PROFILE_CREATED: "user:profile-created",
   USER_PROFILE_UPDATED: "user:profile-updated",
 } as const;
 

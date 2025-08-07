@@ -145,12 +145,12 @@ describe("Club Functions", () => {
       );
 
       // Validate join request activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const joinActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_JOIN_REQUEST);
       expect(joinActivity).toBeDefined();
       expect(joinActivity?.createdBy).toBe(userId);
       expect(joinActivity?.resourceId).toBe(clubId);
-      expect(joinActivity?.relatedIds).toContain(membership?._id);
+      expect(joinActivity?.relatedId).toEqual(userId);
     });
 
     it("throws when user already member", async () => {
@@ -255,12 +255,12 @@ describe("Club Functions", () => {
       expect(updatedClub?.numMembers).toBe(0);
 
       // Validate leave activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const leaveActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_LEFT);
       expect(leaveActivity).toBeDefined();
       expect(leaveActivity?.createdBy).toBe(userId);
       expect(leaveActivity?.resourceId).toBe(clubId);
-      expect(leaveActivity?.relatedIds).toContain(membershipId);
+      expect(leaveActivity?.relatedId).toEqual(userId);
     });
 
     it("throws when user not a member", async () => {
@@ -335,7 +335,7 @@ describe("Club Functions", () => {
       );
 
       // Validate activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       expect(activities).toHaveLength(2);
       expect(activities[1]).toEqual(
         expect.objectContaining({
@@ -349,7 +349,7 @@ describe("Club Functions", () => {
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
           createdBy: userId,
-          relatedIds: expect.arrayContaining([membership!._id]),
+          relatedId: userId,
         }),
       );
     });
@@ -389,7 +389,7 @@ describe("Club Functions", () => {
       );
 
       // Validate activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       expect(activities).toHaveLength(2);
       expect(activities[1]).toEqual(
         expect.objectContaining({
@@ -403,7 +403,7 @@ describe("Club Functions", () => {
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
           createdBy: userId,
-          relatedIds: expect.arrayContaining([membership!._id]),
+          relatedId: userId,
         }),
       );
     });
@@ -478,7 +478,7 @@ describe("Club Functions", () => {
       expect(updatedClub?.name).toBe("Updated Club Name");
 
       // Validate update activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const updateActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_UPDATED);
       expect(updateActivity).toBeDefined();
       expect(updateActivity?.createdBy).toBe(userId);
@@ -550,7 +550,7 @@ describe("Club Functions", () => {
       expect(deletedClub).toBeNull();
 
       // Validate activities were cleaned up
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       expect(activities).toHaveLength(1);
       expect(activities[0]).toEqual(
         expect.objectContaining({
@@ -606,14 +606,14 @@ describe("Club Functions", () => {
       );
 
       // Validate membership update activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const updateActivity = activities.find(
         (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
       );
       expect(updateActivity).toBeDefined();
       expect(updateActivity?.createdBy).toBe(ownerId);
       expect(updateActivity?.resourceId).toBe(clubId);
-      expect(updateActivity?.relatedIds).toContain(membershipId);
+      expect(updateActivity?.relatedId).toEqual(userId);
     });
 
     it("allows system admin to update any membership", async () => {
@@ -752,14 +752,14 @@ describe("Club Functions", () => {
       expect(updatedClub?.numMembers).toBe(1);
 
       // Validate membership removal activity was created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const removeActivity = activities.find(
         (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       );
       expect(removeActivity).toBeDefined();
       expect(removeActivity?.createdBy).toBe(ownerId);
       expect(removeActivity?.resourceId).toBe(clubId);
-      expect(removeActivity?.relatedIds).toContain(membershipId);
+      expect(removeActivity?.relatedId).toEqual(userId);
     });
 
     it("prevents removing club owner", async () => {

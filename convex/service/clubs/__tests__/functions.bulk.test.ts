@@ -113,7 +113,7 @@ describe("Bulk Club Operations", () => {
       expect(updatedMembership2?.isApproved).toBe(true);
 
       // Validate join activities were created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const joinActivities = activities.filter((a) => a.type === ACTIVITY_TYPES.CLUB_JOINED);
       expect(joinActivities).toHaveLength(2);
       joinActivities.forEach((activity) => {
@@ -234,7 +234,7 @@ describe("Bulk Club Operations", () => {
       expect(updatedClub?.numMembers).toBe(1);
 
       // Validate removal activities were created
-      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const activities = await activityHelpers.getActivitiesForResource(clubId);
       const removeActivities = activities.filter(
         (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       );
