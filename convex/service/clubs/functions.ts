@@ -2,6 +2,8 @@ import { Id } from "@/convex/_generated/dataModel";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
+  CLUB_CANNOT_BAN_OWNER_ERROR,
+  CLUB_CANNOT_BAN_SELF_ERROR,
   CLUB_FULL_ERROR,
   CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR,
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
@@ -10,6 +12,8 @@ import {
   CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR,
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
+  CLUB_USER_BANNED_ERROR,
+  CLUB_USER_NOT_BANNED_ERROR,
 } from "@/convex/constants/errors";
 import {
   createActivity as dtoCreateActivity,
@@ -36,6 +40,7 @@ import { getMetadata } from "../utils/metadata";
 import {
   createClub as dtoCreateClub,
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
+  getClubBanRecordForUser as dtoGetClubBanRecordForUser,
   getClubOrThrow as dtoGetClubOrThrow,
   getMyClubMembership as dtoGetMyClubMembership,
   listMyClubs as dtoListMyClubs,
@@ -104,6 +109,13 @@ export const joinClub = authenticatedMutationWithRLS()({
     const rateLimitKey = ctx.currentUser._id + args.clubId;
     await enforceRateLimit(ctx, "joinClub", rateLimitKey);
     const club = await dtoGetClubOrThrow(ctx, args.clubId);
+
+    // Check if user is banned
+    const existingBan = await dtoGetClubBanRecordForUser(ctx, club._id, ctx.currentUser._id);
+    if (existingBan) {
+      throw new ConvexError(CLUB_USER_BANNED_ERROR);
+    }
+
     if (club.numMembers >= club.maxMembers) {
       throw new ConvexError(CLUB_FULL_ERROR);
     }
@@ -559,6 +571,8 @@ const validateBulkMemberships = async (
 ): Promise<{ memberships: ClubMembership[]; club: Club | null }> => {
   if (membershipIds.length === 0) return { memberships: [], club: null };
 
+  // Remove duplicate IDs
+  membershipIds = [...new Set(membershipIds)];
   const memberships = await Promise.all(membershipIds.map((id) => ctx.db.get(id)));
   const validMemberships = memberships.filter(Boolean) as ClubMembership[];
 
@@ -575,3 +589,112 @@ const validateBulkMemberships = async (
 
   return { memberships: validMemberships, club };
 };
+
+/**
+ * Bans a club member. Only club owner, club admin, or system admin can ban members.
+ * @throws ConvexError when membership doesn't exist or user lacks permissions
+ */
+export const banClubMember = authenticatedMutationWithRLS()({
+  args: {
+    membershipId: zid("clubMemberships"),
+    reason: z.string().max(500).optional(),
+  },
+  handler: async (ctx, args) => {
+    const membership = await ctx.db.get(args.membershipId);
+    if (!membership) {
+      throw new ConvexError(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
+    }
+
+    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
+    await enforceClubMembershipPermissions(ctx, club);
+
+    // Prevent banning club owner or self
+    if (membership.userId === club.createdBy) {
+      throw new ConvexError(CLUB_CANNOT_BAN_OWNER_ERROR);
+    }
+    if (membership.userId === ctx.currentUser._id) {
+      throw new ConvexError(CLUB_CANNOT_BAN_SELF_ERROR);
+    }
+
+    // Remove membership first
+    await ctx.db.delete(args.membershipId);
+
+    // Add ban record
+    await ctx.db.insert("clubBans", {
+      clubId: membership.clubId,
+      userId: membership.userId,
+      bannedBy: ctx.currentUser._id,
+      bannedAt: Date.now(),
+      reason: args.reason,
+      isActive: true,
+    });
+
+    // Update member count
+    if (club.numMembers > 0) {
+      await dtoUpdateClub(ctx, membership.clubId, { numMembers: club.numMembers - 1 });
+    }
+
+    // Log activity
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: membership.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBER_BANNED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [{ newValue: args.reason }],
+    });
+  },
+});
+
+/**
+ * Unbans a club member. Only club owner, club admin, or system admin can unban members.
+ * @throws ConvexError when ban doesn't exist or user lacks permissions
+ */
+export const unbanClubMember = authenticatedMutationWithRLS()({
+  args: {
+    clubId: zid("clubs"),
+    userId: zid("users"),
+  },
+  handler: async (ctx, args) => {
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    await enforceClubMembershipPermissions(ctx, club);
+
+    const ban = await dtoGetClubBanRecordForUser(ctx, args.clubId, args.userId);
+    if (!ban) {
+      throw new ConvexError(CLUB_USER_NOT_BANNED_ERROR);
+    }
+
+    // Deactivate ban
+    await ctx.db.patch(ban._id, { isActive: false });
+
+    // Log activity
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedId: args.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED,
+      createdBy: ctx.currentUser._id,
+      createdAt: Date.now(),
+      metadata: [{ previousValue: ban.reason }],
+    });
+  },
+});
+
+/**
+ * Lists banned users for a club. Only club owner, club admin, or system admin can view bans.
+ * @returns Paginated list of banned users
+ */
+export const listClubBans = authenticatedQueryWithRLS()({
+  args: {
+    clubId: zid("clubs"),
+    pagination: convexToZod(paginationOptsValidator),
+  },
+  handler: async (ctx, args) => {
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    await enforceClubMembershipPermissions(ctx, club);
+
+    return await ctx.db
+      .query("clubBans")
+      .withIndex("clubActive", (q) => q.eq("clubId", args.clubId).eq("isActive", true))
+      .paginate(args.pagination);
+  },
+});

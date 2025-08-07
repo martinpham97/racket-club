@@ -7,6 +7,8 @@ export const ACTIVITY_TYPES = {
   CLUB_LEFT: "club:left",
   CLUB_MEMBERSHIP_REMOVED: "club:membership-removed",
   CLUB_MEMBERSHIP_UPDATED: "club:membership-updated",
+  CLUB_MEMBER_BANNED: "club:member-banned",
+  CLUB_MEMBER_UNBANNED: "club:member-unbanned",
   USER_CREATED: "user:created",
   USER_PROFILE_CREATED: "user:profile-created",
   USER_PROFILE_UPDATED: "user:profile-updated",

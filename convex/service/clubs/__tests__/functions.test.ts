@@ -203,6 +203,23 @@ describe("Club Functions", () => {
       ).rejects.toThrow(CLUB_PUBLIC_UNAPPROVED_ERROR);
     });
 
+    it("handles member count correctly when club is at zero", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId, { numMembers: 0 });
+      const clubId = await clubHelpers.insertClub(club);
+      await clubHelpers.approveClub(clubId);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.clubs.functions.joinClub, {
+        clubId,
+        membershipInfo: { name: "Test" },
+      });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(1);
+    });
+
     it("allows joining public approved club", async () => {
       const userId = await userHelpers.insertUser();
       await userHelpers.insertProfile(createTestProfile(userId));
@@ -348,6 +365,23 @@ describe("Club Functions", () => {
       await expect(
         asUser.mutation(api.service.clubs.functions.leaveClub, { clubId }),
       ).rejects.toThrow(CLUB_MEMBERSHIP_REQUIRED_ERROR);
+    });
+
+    it("handles member count correctly when already at zero", async () => {
+      const ownerUserId = await userHelpers.insertUser();
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(ownerUserId, { numMembers: 0 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      await clubHelpers.insertMembership(membership);
+
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.clubs.functions.leaveClub, { clubId });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(0);
     });
   });
 
@@ -900,6 +934,27 @@ describe("Club Functions", () => {
       expect(updatedMembership?.isApproved).toBe(true);
       expect(updatedMembership?.isClubAdmin).toBe(true);
     });
+
+    it("handles empty membership input gracefully", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      const membershipId = await clubHelpers.insertMembership(membership);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      await expect(
+        asOwner.mutation(api.service.clubs.functions.updateClubMembership, {
+          membershipId,
+          input: {},
+        }),
+      ).resolves.toBeDefined();
+    });
   });
 
   describe("removeClubMember", () => {
@@ -1017,6 +1072,26 @@ describe("Club Functions", () => {
           membershipId,
         }),
       ).rejects.toThrow(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
+    });
+
+    it("handles member count correctly when already at zero", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId, { numMembers: 0 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      const membershipId = await clubHelpers.insertMembership(membership);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      await asOwner.mutation(api.service.clubs.functions.removeClubMember, {
+        membershipId,
+      });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(0);
     });
   });
 

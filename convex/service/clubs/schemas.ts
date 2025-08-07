@@ -100,7 +100,24 @@ export const clubMembershipTable = defineTable(zodToConvex(clubMembershipSchema)
   .index("userId", ["userId"])
   .index("clubUser", ["clubId", "userId"]);
 
+export const clubBanSchema = z.object({
+  clubId: zid("clubs"),
+  userId: zid("users"),
+  bannedBy: zid("users"),
+  bannedAt: z.number(),
+  reason: z.string().max(500, "Ban reason must be less than 500 characters").optional(),
+  isActive: z.boolean(),
+});
+
+export const clubBanTable = defineTable(zodToConvex(clubBanSchema))
+  .index("clubUser", ["clubId", "userId"])
+  .index("clubActive", ["clubId", "isActive"])
+  .index("userId", ["userId"]);
+
+export type ClubBan = DocumentByName<DataModel, "clubBans">;
+
 export const clubTables = {
   clubs: clubTable,
   clubMemberships: clubMembershipTable,
+  clubBans: clubBanTable,
 };

@@ -41,3 +41,11 @@ export const CLUB_OWNER_CANNOT_LEAVE_ERROR =
 
 export const CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR =
   "A public club with the same name already exists. Please consider renaming your club or create a private club.";
+
+export const CLUB_USER_BANNED_ERROR = "You are banned from this club.";
+
+export const CLUB_USER_NOT_BANNED_ERROR = "This user is not banned from the club.";
+
+export const CLUB_CANNOT_BAN_OWNER_ERROR = "You cannot ban the club owner.";
+
+export const CLUB_CANNOT_BAN_SELF_ERROR = "You cannot ban yourself.";

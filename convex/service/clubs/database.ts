@@ -136,3 +136,22 @@ export const deleteAllClubMemberships = async (
   memberships.forEach(async (membership) => await ctx.db.delete(membership._id));
   await ctx.db.patch(clubId, { numMembers: 0 });
 };
+
+/**
+ * Gets a user's ban record for the given club if exists
+ * @param ctx Authenticated context with profile
+ * @param clubId Club ID
+ * @param userId User ID
+ * @returns Ban record if exists, else null
+ */
+export const getClubBanRecordForUser = async (
+  ctx: AuthenticatedWithProfileCtx,
+  clubId: Id<"clubs">,
+  userId: Id<"users">,
+) => {
+  return await ctx.db
+    .query("clubBans")
+    .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
+    .filter((q) => q.eq(q.field("isActive"), true))
+    .unique();
+};

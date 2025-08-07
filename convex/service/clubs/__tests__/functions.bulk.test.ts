@@ -167,6 +167,28 @@ describe("Bulk Club Operations", () => {
         }),
       ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
     });
+
+    it("handles duplicate membership IDs", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId, { isApproved: false });
+      const membershipId = await clubHelpers.insertMembership(membership);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      const result = await asOwner.mutation(api.service.clubs.functions.approveClubMemberships, {
+        membershipIds: [membershipId, membershipId, membershipId],
+      });
+
+      expect(result).toBe(1);
+      const updatedMembership = await clubHelpers.getMembership(membershipId);
+      expect(updatedMembership?.isApproved).toBe(true);
+    });
   });
 
   describe("bulkRemoveMembers", () => {
@@ -340,6 +362,77 @@ describe("Bulk Club Operations", () => {
           membershipIds: [ownerMembershipId],
         }),
       ).rejects.toThrow("You cannot remove the club owner");
+    });
+
+    it("handles duplicate membership IDs in removal", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId, { numMembers: 2 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      const membershipId = await clubHelpers.insertMembership(membership);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      const result = await asOwner.mutation(api.service.clubs.functions.bulkRemoveMembers, {
+        membershipIds: [membershipId, membershipId],
+      });
+
+      expect(result).toBe(1);
+      const deletedMembership = await clubHelpers.getMembership(membershipId);
+      expect(deletedMembership).toBeNull();
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(1);
+    });
+
+    it("handles member count underflow protection", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId, { numMembers: 0 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId);
+      const membershipId = await clubHelpers.insertMembership(membership);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      const result = await asOwner.mutation(api.service.clubs.functions.bulkRemoveMembers, {
+        membershipIds: [membershipId],
+      });
+
+      expect(result).toBe(1);
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(0);
+    });
+
+    it("skips member count update when removedCount exceeds numMembers", async () => {
+      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const userId = await userHelpers.insertUser("member@example.com");
+
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+
+      const club = createTestClub(ownerId, { numMembers: 1 });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership1 = createTestClubMembership(clubId, userId);
+      const membership2 = createTestClubMembership(clubId, userId);
+      const membershipId1 = await clubHelpers.insertMembership(membership1);
+      const membershipId2 = await clubHelpers.insertMembership(membership2);
+
+      const asOwner = t.withIdentity({ subject: ownerId });
+      const result = await asOwner.mutation(api.service.clubs.functions.bulkRemoveMembers, {
+        membershipIds: [membershipId1, membershipId2],
+      });
+
+      expect(result).toBe(2);
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.numMembers).toBe(1);
     });
   });
 

@@ -1,6 +1,6 @@
 import { Id } from "@/convex/_generated/dataModel";
 import schema from "@/convex/schema";
-import { Club, ClubCreateInput, ClubMembership } from "@/convex/service/clubs/schemas";
+import { Club, ClubBan, ClubCreateInput, ClubMembership } from "@/convex/service/clubs/schemas";
 import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
@@ -74,6 +74,32 @@ export const createTestClubMembershipRecord = (
   };
 };
 
+export const createTestClubBan = (
+  clubId?: Id<"clubs">,
+  userId?: Id<"users">,
+  bannedBy?: Id<"users">,
+  overrides?: Partial<ClubBan>,
+): Omit<ClubBan, "_id" | "_creationTime"> => ({
+  clubId: clubId || genId<"clubs">("clubs"),
+  userId: userId || genId<"users">("users"),
+  bannedBy: bannedBy || genId<"users">("users"),
+  bannedAt: Date.now(),
+  reason: "Test ban reason",
+  isActive: true,
+  ...overrides,
+});
+
+export const createTestClubBanRecord = (
+  clubId?: Id<"clubs">,
+  userId?: Id<"users">,
+  bannedBy?: Id<"users">,
+  overrides?: Partial<ClubBan>,
+): ClubBan => ({
+  _id: genId<"clubBans">("clubBans"),
+  _creationTime: Date.now(),
+  ...createTestClubBan(clubId, userId, bannedBy, overrides),
+});
+
 export class ClubTestHelpers {
   constructor(private t: TestConvex<typeof schema>) {}
 
@@ -93,6 +119,12 @@ export class ClubTestHelpers {
     });
   }
 
+  async insertClubBan(ban: WithoutSystemFields<ClubBan>) {
+    return await this.t.run(async (ctx) => {
+      return await ctx.db.insert("clubBans", ban);
+    });
+  }
+
   async approveClub(clubId: Id<"clubs">) {
     return await this.t.run(async (ctx) => ctx.db.patch(clubId, { isApproved: true }));
   }
@@ -105,12 +137,35 @@ export class ClubTestHelpers {
     return await this.t.run(async (ctx) => ctx.db.get(membershipId));
   }
 
+  async getClubBan(banId: Id<"clubBans">) {
+    return await this.t.run(async (ctx) => ctx.db.get(banId));
+  }
+
   async getMembershipForUser(clubId: Id<"clubs">, userId: Id<"users">) {
     return await this.t.run(async (ctx) =>
       ctx.db
         .query("clubMemberships")
         .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
         .unique(),
+    );
+  }
+
+  async getActiveBanForUser(clubId: Id<"clubs">, userId: Id<"users">) {
+    return await this.t.run(async (ctx) =>
+      ctx.db
+        .query("clubBans")
+        .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
+        .filter((q) => q.eq(q.field("isActive"), true))
+        .unique(),
+    );
+  }
+
+  async listActiveBansForClub(clubId: Id<"clubs">) {
+    return await this.t.run(async (ctx) =>
+      ctx.db
+        .query("clubBans")
+        .withIndex("clubActive", (q) => q.eq("clubId", clubId).eq("isActive", true))
+        .collect(),
     );
   }
 
