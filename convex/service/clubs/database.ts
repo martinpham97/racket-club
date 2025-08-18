@@ -2,10 +2,8 @@
 
 import { Id } from "@/convex/_generated/dataModel";
 import { QueryCtx } from "@/convex/_generated/server";
-import { CLUB_NOT_FOUND_ERROR } from "@/convex/constants/errors";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { PaginationOptions, PaginationResult } from "convex/server";
-import { ConvexError } from "convex/values";
 import { Club, ClubCreateInput, ClubMembership, MyClub } from "./schemas";
 
 /**
@@ -19,34 +17,21 @@ export const getClub = async (ctx: QueryCtx, clubId: Id<"clubs">): Promise<Club 
 };
 
 /**
- * Gets a club by its ID or throws an error if not found.
- * @param ctx Query context
- * @param clubId Club ID to retrieve
- * @returns Club document
- * @throws ConvexError when club doesn't exist
- */
-export const getClubOrThrow = async (ctx: QueryCtx, clubId: Id<"clubs">): Promise<Club> => {
-  const club = await getClub(ctx, clubId);
-  if (!club) {
-    throw new ConvexError(CLUB_NOT_FOUND_ERROR);
-  }
-  return club;
-};
-
-/**
- * Gets the current user's membership for a specific club.
- * @param ctx Authenticated context with profile
+ * Gets the user's membership for a specific club.
+ * @param ctx Query Ctx
  * @param clubId Club ID to get membership for
+ * @param userId User Id to get membership for
  * @returns Club membership if user is a member, null otherwise
  */
-export const getMyClubMembership = async (
-  ctx: AuthenticatedWithProfileCtx,
+export const getClubMembershipForUser = async (
+  ctx: QueryCtx,
   clubId: Id<"clubs">,
+  userId: Id<"users">,
 ): Promise<ClubMembership | null> => {
   return await ctx.db
     .query("clubMemberships")
-    .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", ctx.currentUser._id))
-    .unique();
+    .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
+    .first();
 };
 
 /**

@@ -10,7 +10,6 @@ import {
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
   CLUB_MEMBERSHIP_NOT_FOUND_ERROR,
   CLUB_MEMBERSHIP_REQUIRED_ERROR,
-  CLUB_NOT_FOUND_ERROR,
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
@@ -1176,7 +1175,7 @@ describe("Club Functions", () => {
           clubId,
           pagination: { cursor: null, numItems: 10 },
         }),
-      ).rejects.toThrow(CLUB_NOT_FOUND_ERROR);
+      ).rejects.toThrow();
     });
 
     it("throws error when user is not club member", async () => {

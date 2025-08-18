@@ -29,7 +29,7 @@ vi.mock("@/convex/service/utils/validators/auth");
 vi.mock("@/convex/service/clubs/database");
 
 const mockIsOwnerOrSystemAdmin = vi.mocked(authModule.isOwnerOrSystemAdmin);
-const mockGetMyClubMembership = vi.mocked(clubDatabase.getMyClubMembership);
+const mockGetClubMembershipForUser = vi.mocked(clubDatabase.getClubMembershipForUser);
 
 describe("enforceClubOwnershipOrAdmin", () => {
   let mockCtx: AuthenticatedWithProfileCtx;
@@ -54,7 +54,7 @@ describe("enforceClubOwnershipOrAdmin", () => {
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).resolves.toBeUndefined();
 
       expect(mockIsOwnerOrSystemAdmin).toHaveBeenCalledWith(testUser, testClub.createdBy);
-      expect(mockGetMyClubMembership).not.toHaveBeenCalled();
+      expect(mockGetClubMembershipForUser).not.toHaveBeenCalled();
     });
 
     it("should allow access when user is system admin", async () => {
@@ -67,7 +67,7 @@ describe("enforceClubOwnershipOrAdmin", () => {
       await expect(enforceClubOwnershipOrAdmin(mockCtx, otherUserClub)).resolves.toBeUndefined();
 
       expect(mockIsOwnerOrSystemAdmin).toHaveBeenCalledWith(adminUser, otherUserClub.createdBy);
-      expect(mockGetMyClubMembership).not.toHaveBeenCalled();
+      expect(mockGetClubMembershipForUser).not.toHaveBeenCalled();
     });
   });
 
@@ -81,23 +81,31 @@ describe("enforceClubOwnershipOrAdmin", () => {
         isClubAdmin: true,
       });
 
-      mockGetMyClubMembership.mockResolvedValue(membership);
+      mockGetClubMembershipForUser.mockResolvedValue(membership);
 
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).resolves.toBeUndefined();
 
-      expect(mockGetMyClubMembership).toHaveBeenCalledWith(mockCtx, testClub._id);
+      expect(mockGetClubMembershipForUser).toHaveBeenCalledWith(
+        mockCtx,
+        testClub._id,
+        testUser._id,
+      );
     });
 
     it("should not allow access when user is approved member (but is not club admin)", async () => {
       const membership = createTestClubMembershipRecord(testClub._id, testUser.profile!._id);
 
-      mockGetMyClubMembership.mockResolvedValue(membership);
+      mockGetClubMembershipForUser.mockResolvedValue(membership);
 
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).rejects.toThrow(
         AUTH_ACCESS_DENIED_ERROR,
       );
 
-      expect(mockGetMyClubMembership).toHaveBeenCalledWith(mockCtx, testClub._id);
+      expect(mockGetClubMembershipForUser).toHaveBeenCalledWith(
+        mockCtx,
+        testClub._id,
+        testUser._id,
+      );
     });
 
     it("should deny access when user is not approved member", async () => {
@@ -105,23 +113,31 @@ describe("enforceClubOwnershipOrAdmin", () => {
         isApproved: false,
       });
 
-      mockGetMyClubMembership.mockResolvedValue(membership);
+      mockGetClubMembershipForUser.mockResolvedValue(membership);
 
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).rejects.toThrow(
         AUTH_ACCESS_DENIED_ERROR,
       );
 
-      expect(mockGetMyClubMembership).toHaveBeenCalledWith(mockCtx, testClub._id);
+      expect(mockGetClubMembershipForUser).toHaveBeenCalledWith(
+        mockCtx,
+        testClub._id,
+        testUser._id,
+      );
     });
 
     it("should deny access when user is not a member", async () => {
-      mockGetMyClubMembership.mockResolvedValue(null);
+      mockGetClubMembershipForUser.mockResolvedValue(null);
 
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).rejects.toThrow(
         AUTH_ACCESS_DENIED_ERROR,
       );
 
-      expect(mockGetMyClubMembership).toHaveBeenCalledWith(mockCtx, testClub._id);
+      expect(mockGetClubMembershipForUser).toHaveBeenCalledWith(
+        mockCtx,
+        testClub._id,
+        testUser._id,
+      );
     });
 
     it("should deny access when user is club admin but not approved", async () => {
@@ -130,13 +146,17 @@ describe("enforceClubOwnershipOrAdmin", () => {
         isClubAdmin: true,
       });
 
-      mockGetMyClubMembership.mockResolvedValue(membership);
+      mockGetClubMembershipForUser.mockResolvedValue(membership);
 
       await expect(enforceClubOwnershipOrAdmin(mockCtx, testClub)).rejects.toThrow(
         AUTH_ACCESS_DENIED_ERROR,
       );
 
-      expect(mockGetMyClubMembership).toHaveBeenCalledWith(mockCtx, testClub._id);
+      expect(mockGetClubMembershipForUser).toHaveBeenCalledWith(
+        mockCtx,
+        testClub._id,
+        testUser._id,
+      );
     });
   });
 });

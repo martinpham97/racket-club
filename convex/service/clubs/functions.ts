@@ -15,6 +15,7 @@ import {
   createActivity as dtoCreateActivity,
   listActivitiesForResource as dtoListActivitiesForResource,
 } from "@/convex/service/activities/database";
+import { ActivityMetadata } from "@/convex/service/activities/schemas";
 import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
 import {
   authenticatedMutationWithRLS,
@@ -22,6 +23,7 @@ import {
   AuthenticatedWithProfileCtx,
   publicQueryWithRLS,
 } from "@/convex/service/utils/functions";
+import { getMetadata } from "@/convex/service/utils/metadata";
 import {
   enforceClubMembershipPermissions,
   enforceClubOwnershipOrAdmin,
@@ -32,18 +34,16 @@ import {
   validateMembershipExists,
 } from "@/convex/service/utils/validators/clubs";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
+import { getOrThrow } from "convex-helpers/server/relationships";
 import { convexToZod, zid } from "convex-helpers/server/zod";
 import { paginationOptsValidator, WithoutSystemFields } from "convex/server";
 import { ConvexError } from "convex/values";
 import { z } from "zod";
-import { ActivityMetadata } from "../activities/schemas";
-import { getMetadata } from "../utils/metadata";
 import {
   createClub as dtoCreateClub,
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
   getClubBanRecordForUser as dtoGetClubBanRecordForUser,
-  getClubOrThrow as dtoGetClubOrThrow,
-  getMyClubMembership as dtoGetMyClubMembership,
+  getClubMembershipForUser as dtoGetClubMembershipForUser,
   listMyClubs as dtoListMyClubs,
   listPublicClubs as dtoListPublicClubs,
   updateClub as dtoUpdateClub,
@@ -97,7 +97,7 @@ export const listMyClubs = authenticatedQueryWithRLS()({
  */
 export const getClub = publicQueryWithRLS()({
   args: { clubId: zid("clubs") },
-  handler: async (ctx, args) => await dtoGetClubOrThrow(ctx, args.clubId),
+  handler: async (ctx, args) => await getOrThrow(ctx, args.clubId),
 });
 
 /**
@@ -113,8 +113,8 @@ export const listClubActivities = authenticatedQueryWithRLS()({
     pagination: convexToZod(paginationOptsValidator),
   },
   handler: async (ctx, args) => {
-    await dtoGetClubOrThrow(ctx, args.clubId);
-    const membership = await dtoGetMyClubMembership(ctx, args.clubId);
+    await getOrThrow(ctx, args.clubId);
+    const membership = await dtoGetClubMembershipForUser(ctx, args.clubId, ctx.currentUser._id);
 
     if (!membership) {
       throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
@@ -143,7 +143,7 @@ export const joinClub = authenticatedMutationWithRLS()({
   },
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "joinClub", ctx.currentUser._id + args.clubId);
-    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    const club = await getOrThrow(ctx, args.clubId);
 
     const existingBan = await dtoGetClubBanRecordForUser(ctx, club._id, ctx.currentUser._id);
     if (existingBan) {
@@ -178,7 +178,7 @@ export const leaveClub = authenticatedMutationWithRLS()({
   args: { clubId: zid("clubs") },
   handler: async (ctx, args) => {
     const { clubId } = args;
-    const club = await dtoGetClubOrThrow(ctx, clubId);
+    const club = await getOrThrow(ctx, clubId);
 
     if (isClubOwner(club, ctx.currentUser._id)) {
       throw new ConvexError(CLUB_OWNER_CANNOT_LEAVE_ERROR);
@@ -253,7 +253,7 @@ export const updateClub = authenticatedMutationWithRLS()({
   },
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "updateClub", ctx.currentUser._id + args.clubId);
-    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    const club = await getOrThrow(ctx, args.clubId);
     await enforceClubOwnershipOrAdmin(ctx, club);
     await validateClubUpdateInput(ctx, args.input, club);
 
@@ -276,7 +276,7 @@ export const updateClub = authenticatedMutationWithRLS()({
 export const deleteClub = authenticatedMutationWithRLS()({
   args: { clubId: zid("clubs") },
   handler: async (ctx, args) => {
-    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    const club = await getOrThrow(ctx, args.clubId);
     await enforceClubOwnershipOrAdmin(ctx, club);
     await dtoDeleteAllClubMemberships(ctx, args.clubId);
     await ctx.db.delete(args.clubId);
@@ -305,7 +305,7 @@ export const updateClubMembership = authenticatedMutationWithRLS()({
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "updateClubMembership", ctx.currentUser._id + args.membershipId);
     const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
+    const club = await getOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     await ctx.db.patch(args.membershipId, args.input);
@@ -328,7 +328,7 @@ export const removeClubMember = authenticatedMutationWithRLS()({
   args: { membershipId: zid("clubMemberships") },
   handler: async (ctx, args) => {
     const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
+    const club = await getOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     if (isClubOwner(club, membership.userId)) {
@@ -361,7 +361,7 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
       return 0;
     }
 
-    const club = await dtoGetClubOrThrow(ctx, clubId);
+    const club = await getOrThrow(ctx, clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     let approvedCount = 0;
@@ -396,7 +396,7 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
       return 0;
     }
 
-    const club = await dtoGetClubOrThrow(ctx, clubId);
+    const club = await getOrThrow(ctx, clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     const ownerMembership = memberships.find((m) => isClubOwner(club, m.userId));
@@ -438,7 +438,7 @@ export const banClubMember = authenticatedMutationWithRLS()({
   },
   handler: async (ctx, args) => {
     const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
+    const club = await getOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     if (isClubOwner(club, membership.userId)) {
@@ -478,7 +478,7 @@ export const unbanClubMember = authenticatedMutationWithRLS()({
     userId: zid("users"),
   },
   handler: async (ctx, args) => {
-    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    const club = await getOrThrow(ctx, args.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     const ban = await dtoGetClubBanRecordForUser(ctx, args.clubId, args.userId);
@@ -506,7 +506,7 @@ export const listClubBans = authenticatedQueryWithRLS()({
     pagination: convexToZod(paginationOptsValidator),
   },
   handler: async (ctx, args) => {
-    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    const club = await getOrThrow(ctx, args.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     return ctx.db
@@ -556,7 +556,7 @@ const updateMemberCount = async (
   clubId: Id<"clubs">,
   delta: number,
 ) => {
-  const club = await dtoGetClubOrThrow(ctx, clubId);
+  const club = await getOrThrow(ctx, clubId);
   const newCount = Math.max(0, club.numMembers + delta);
   if (newCount !== club.numMembers) {
     await dtoUpdateClub(ctx, clubId, { numMembers: newCount });
@@ -589,7 +589,7 @@ const addCurrentUserToClub = async (
   membershipInfo: WithoutSystemFields<ClubMembership>;
   membershipId: Id<"clubMemberships">;
 }> => {
-  const club = await dtoGetClubOrThrow(ctx, clubId);
+  const club = await getOrThrow(ctx, clubId);
 
   const existingMembership = await ctx.db
     .query("clubMemberships")

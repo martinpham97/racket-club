@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { activityTables } from "./service/activities/schemas";
 import { clubTables } from "./service/clubs/schemas";
 import { userTables } from "./service/users/schemas";
+import { sessionTables } from "./service/sessions/schemas";
 
 // The schema is normally optional, but Convex Auth
 // requires indexes defined on `authTables`.
@@ -13,6 +14,7 @@ export default defineSchema({
   ...userTables,
   ...clubTables,
   ...activityTables,
+  ...sessionTables,
   numbers: defineTable({
     value: v.number(),
   }),

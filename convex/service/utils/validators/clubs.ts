@@ -8,7 +8,7 @@ import {
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
 } from "@/convex/constants/errors";
-import { getMyClubMembership } from "@/convex/service/clubs/database";
+import { getClubMembershipForUser } from "@/convex/service/clubs/database";
 import { Club, ClubMembership, ClubUpdateInput } from "@/convex/service/clubs/schemas";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { ConvexError } from "convex/values";
@@ -23,7 +23,7 @@ import { isOwnerOrSystemAdmin } from "./auth";
  */
 export const enforceClubOwnershipOrAdmin = async (ctx: AuthenticatedWithProfileCtx, club: Club) => {
   if (!isOwnerOrSystemAdmin(ctx.currentUser, club.createdBy)) {
-    const membership = await getMyClubMembership(ctx, club._id);
+    const membership = await getClubMembershipForUser(ctx, club._id, ctx.currentUser._id);
     if (!membership?.isApproved || !membership?.isClubAdmin) {
       throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
     }

@@ -1,22 +1,24 @@
 import { QueryCtx } from "@/convex/_generated/server";
-import { CLUB_NOT_FOUND_ERROR } from "@/convex/constants/errors";
 import {
   createClub,
   deleteAllClubMemberships,
   getClub,
   getClubBanRecordForUser,
-  getClubOrThrow,
-  getMyClubMembership,
+  getClubMembershipForUser,
   listMyClubs,
   listPublicClubs,
   updateClub,
 } from "@/convex/service/clubs/database";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestClub, createTestClubBanRecord, createTestClubMembershipRecord, createTestClubRecord } from "@/test-utils/samples/clubs";
+import {
+  createTestClub,
+  createTestClubBanRecord,
+  createTestClubMembershipRecord,
+  createTestClubRecord,
+} from "@/test-utils/samples/clubs";
 import { genId } from "@/test-utils/samples/id";
 import { createTestUserRecord } from "@/test-utils/samples/users";
-import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createMockAuthCtx = (): AuthenticatedWithProfileCtx =>
@@ -60,45 +62,23 @@ describe("Club Database Service", () => {
     });
   });
 
-  describe("getClubOrThrow", () => {
-    it("returns club when found", async () => {
-      const clubId = genId<"clubs">("clubs");
-      const club = createTestClubRecord(genId<"users">("users"));
-
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(club);
-
-      const result = await getClubOrThrow(mockCtx, clubId);
-
-      expect(result).toEqual(club);
-    });
-
-    it("throws error when club not found", async () => {
-      const clubId = genId<"clubs">("clubs");
-
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(null);
-
-      await expect(getClubOrThrow(mockCtx, clubId)).rejects.toThrow(
-        new ConvexError(CLUB_NOT_FOUND_ERROR),
-      );
-    });
-  });
-
-  describe("getMyClubMembership", () => {
+  describe("getClubMembershipForUser", () => {
     it("returns membership when user is member", async () => {
       const mockCtx = createMockAuthCtx();
+      const userId = genId<"users">("users");
       const clubId = genId<"clubs">("clubs");
       const membership = { clubId, profileId: mockCtx.currentUser.profile._id };
 
       const mockQuery = {
         withIndex: vi.fn(() => ({
-          unique: vi.fn().mockResolvedValueOnce(membership),
+          first: vi.fn().mockResolvedValueOnce(membership),
         })),
       };
       vi.mocked(mockCtx.db.query).mockReturnValueOnce(
         mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
       );
 
-      const result = await getMyClubMembership(mockCtx, clubId);
+      const result = await getClubMembershipForUser(mockCtx, clubId, userId);
 
       expect(result).toEqual(membership);
       expect(mockCtx.db.query).toHaveBeenCalledWith("clubMemberships");
@@ -106,18 +86,19 @@ describe("Club Database Service", () => {
 
     it("returns null when user is not member", async () => {
       const mockCtx = createMockAuthCtx();
+      const userId = genId<"users">("users");
       const clubId = genId<"clubs">("clubs");
 
       const mockQuery = {
         withIndex: vi.fn(() => ({
-          unique: vi.fn().mockResolvedValueOnce(null),
+          first: vi.fn().mockResolvedValueOnce(null),
         })),
       };
       vi.mocked(mockCtx.db.query).mockReturnValueOnce(
         mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
       );
 
-      const result = await getMyClubMembership(mockCtx, clubId);
+      const result = await getClubMembershipForUser(mockCtx, clubId, userId);
 
       expect(result).toBeNull();
     });
@@ -319,9 +300,7 @@ describe("Club Database Service", () => {
       vi.mocked(mockCtx.db.query).mockReturnValueOnce(
         mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
       );
-      vi.mocked(mockCtx.db.get)
-        .mockResolvedValueOnce(club1)
-        .mockResolvedValueOnce(null);
+      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(club1).mockResolvedValueOnce(null);
 
       const result = await listMyClubs(mockCtx, paginationOpts);
 

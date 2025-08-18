@@ -39,7 +39,10 @@ export const enforceOwnershipOrAdmin = (currentUser: UserDetails, targetUserId: 
  * @param options.profileRequired Enforce user profile is created or not. Default: `false`.
  * @returns User details (with optional profile details)
  */
-export const enforceAuthenticated = async (ctx: QueryCtx, options?: { profileRequired?: boolean }) => {
+export const enforceAuthenticated = async (
+  ctx: QueryCtx,
+  options?: { profileRequired?: boolean },
+) => {
   const userWithProfile = await getCurrentUser(ctx);
   if (!userWithProfile) {
     throw new ConvexError(AUTH_UNAUTHENTICATED_ERROR);
