@@ -1,5 +1,13 @@
 import { vi } from "vitest";
 
+export const indexedOperations = vi.fn(() => ({
+  paginate: vi.fn(),
+  unique: vi.fn(),
+  eq: vi.fn(),
+  gte: vi.fn(),
+  lte: vi.fn(),
+}));
+
 export const createMockCtx = <T>(overrides: Partial<T> = {}): T => {
   return {
     db: {
@@ -11,7 +19,9 @@ export const createMockCtx = <T>(overrides: Partial<T> = {}): T => {
         withIndex: vi.fn(() => ({
           paginate: vi.fn(),
           unique: vi.fn(),
-          eq: vi.fn(),
+          eq: indexedOperations,
+          gte: indexedOperations,
+          lte: indexedOperations,
         })),
       })),
     },

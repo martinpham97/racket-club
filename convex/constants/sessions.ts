@@ -18,7 +18,6 @@ export const SESSION_STATUS = {
 } as const;
 
 export const SESSION_VISIBILITY = {
-  PRIVATE: "private",
   MEMBERS_ONLY: "members_only",
   PUBLIC: "public",
 } as const;

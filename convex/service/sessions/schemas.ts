@@ -1,5 +1,6 @@
 import { DataModel } from "@/convex/_generated/dataModel";
 import {
+  SESSION_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR,
   TIME_FORMAT_ERROR,
   TIMESLOT_DURATION_MORE_THAN_24_HOURS_ERROR,
 } from "@/convex/constants/errors";
@@ -29,6 +30,15 @@ import {
 import { zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
+
+export const sessionInstanceFiltersSchema = z.object({
+  fromDate: z.number(),
+  toDate: z.number(),
+  clubIds: z.array(zid("clubs")).optional(),
+  skillLevelMin: z.number().min(0).max(5).optional(),
+  skillLevelMax: z.number().min(0).max(5).optional(),
+  location: z.string().optional(),
+});
 
 const locationSchema = z.object({
   name: z.string(),
@@ -95,7 +105,11 @@ const baseTimeslotSchema = z.object({
   feeType: z.enum([FEE_TYPE.SPLIT, FEE_TYPE.FIXED]),
   fee: z.number().min(0).optional(),
   discounts: z.array(discountSchema).max(MAX_DISCOUNTS).optional(),
-  maxParticipants: z.number().min(MIN_PARTICIPANTS).max(MAX_PARTICIPANTS),
+  maxParticipants: z
+    .number()
+    .min(MIN_PARTICIPANTS, SESSION_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR)
+    .max(MAX_PARTICIPANTS, SESSION_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR),
+  maxWaitlist: z.number().min(MIN_WAITLIST).max(MAX_WAITLIST),
   permanentParticipants: z.array(zid("users")).max(MAX_PARTICIPANTS),
 });
 
@@ -103,10 +117,11 @@ const timeslotTemplateSchema = baseTimeslotSchema;
 
 const timeslotInstanceSchema = baseTimeslotSchema.extend({
   id: z.string(),
+  numParticipants: z.number(),
+  numWaitlisted: z.number(),
 });
 
 export const sessionVisibilitySchema = z.enum([
-  SESSION_VISIBILITY.PRIVATE,
   SESSION_VISIBILITY.MEMBERS_ONLY,
   SESSION_VISIBILITY.PUBLIC,
 ]);
@@ -120,7 +135,7 @@ export const baseSessionSchema = z.object({
   banner: z.string().optional(),
   type: z.enum([SESSION_TYPE.SOCIAL, SESSION_TYPE.TRAINING]),
   schedule: scheduleSchema,
-  maxWaitlist: z.number().min(MIN_WAITLIST).max(MAX_WAITLIST),
+
   paymentType: z.enum([PAYMENT_TYPE.CASH]),
   visibility: sessionVisibilitySchema,
   graceTime: graceTimeSchema.optional(),
@@ -163,6 +178,7 @@ export const sessionParticipantSchema = z.object({
   timeslotId: z.string(),
   userId: zid("users"),
   joinedAt: z.number(),
+  instanceDate: z.number(),
   isWaitlisted: z.boolean(),
 });
 
@@ -184,10 +200,16 @@ export type SessionParticipant = DocumentByName<DataModel, "sessionParticipants"
 export type SessionSchedule = z.infer<typeof scheduleSchema>;
 export type SessionRecurrence = z.infer<typeof sessionRecurrenceSchema>;
 export type SessionVisibility = z.infer<typeof sessionVisibilitySchema>;
+export type SessionInstanceStatus = z.infer<typeof sessionInstanceStatusSchema>;
 export type SessionTemplateCreateInput = z.infer<typeof sessionTemplateCreateInputSchema>;
 export type SessionTemplateUpdateInput = z.infer<typeof sessionTemplateUpdateInputSchema>;
 export type TimeslotTemplate = z.infer<typeof timeslotTemplateSchema>;
 export type TimeslotInstance = z.infer<typeof timeslotInstanceSchema>;
+export type SessionInstanceFilters = z.infer<typeof sessionInstanceFiltersSchema>;
+
+export type SessionInstanceDetails = DocumentByName<DataModel, "sessionInstances"> & {
+  participation: SessionParticipant;
+};
 
 export const sessionTemplateTable = defineTable(zodToConvex(sessionTemplateSchema))
   .index("clubId", ["clubId"])
@@ -198,14 +220,14 @@ export const sessionTemplateTable = defineTable(zodToConvex(sessionTemplateSchem
   .index("createdBy", ["createdBy"]);
 
 export const sessionInstanceTable = defineTable(zodToConvex(sessionInstanceSchema))
-  .index("sessionTemplateId", ["sessionTemplateId"])
+  .index("clubIdInstanceDate", ["clubId", "instanceDate"])
   .index("sessionTemplateIdInstanceDate", ["sessionTemplateId", "instanceDate"])
-  .index("status", ["status"]);
+  .index("instanceDate", ["instanceDate"]);
 
 export const sessionParticipantTable = defineTable(zodToConvex(sessionParticipantSchema))
   .index("sessionInstanceId", ["sessionInstanceId"])
   .index("timeslotId", ["timeslotId"])
-  .index("userId", ["userId"])
+  .index("userIdInstanceDate", ["userId", "instanceDate"])
   .index("instanceUser", ["sessionInstanceId", "userId"])
   .index("timeslotWaitlistJoinedAt", ["timeslotId", "isWaitlisted", "joinedAt"]);
 

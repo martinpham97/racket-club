@@ -257,7 +257,10 @@ export const updateClub = authenticatedMutationWithRLS()({
     await enforceClubOwnershipOrAdmin(ctx, club);
     await validateClubUpdateInput(ctx, args.input, club);
 
-    await dtoUpdateClub(ctx, args.clubId, args.input);
+    await dtoUpdateClub(ctx, args.clubId, {
+      ...args.input,
+      isApproved: args.input.isPublic ? false : club.isApproved,
+    });
     await createClubActivity(
       ctx,
       args.clubId,

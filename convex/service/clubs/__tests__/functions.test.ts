@@ -775,6 +775,50 @@ describe("Club Functions", () => {
         asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input }),
       ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
     });
+
+    it("sets isApproved to false when changing to public", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId, { isPublic: false, isApproved: true });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { isPublic: true };
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.isPublic).toBe(true);
+      expect(updatedClub?.isApproved).toBe(false);
+    });
+
+    it("preserves isApproved when changing to private", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId, { isPublic: true, isApproved: true });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { isPublic: false };
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.isPublic).toBe(false);
+      expect(updatedClub?.isApproved).toBe(true);
+    });
+
+    it("preserves isApproved when staying private", async () => {
+      const userId = await userHelpers.insertUser();
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = createTestClub(userId, { isPublic: false, isApproved: true });
+      const clubId = await clubHelpers.insertClub(club);
+
+      const input = { name: "Updated Name" };
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.clubs.functions.updateClub, { clubId, input });
+
+      const updatedClub = await clubHelpers.getClubRecord(clubId);
+      expect(updatedClub?.isApproved).toBe(true);
+    });
   });
 
   describe("deleteClub", () => {

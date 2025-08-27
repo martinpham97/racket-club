@@ -1,4 +1,5 @@
 import { PaginationOptions } from "convex/server";
+import z from "zod";
 
 /**
  * Creates pagination options with default values.
@@ -12,3 +13,15 @@ export const getPaginationOpts = (paginationOpts?: Partial<PaginationOptions>) =
     numItems: paginationOpts?.numItems ?? 20,
   };
 };
+
+/**
+ * Creates a Zod schema for paginated results
+ * @param itemSchema - Zod schema for individual items in the page
+ * @returns Zod schema for paginated response with page array, isDone flag, and continueCursor
+ */
+export const paginatedResult = <T extends z.ZodTypeAny>(itemSchema: T) =>
+  z.object({
+    page: z.array(itemSchema),
+    isDone: z.boolean(),
+    continueCursor: z.string(),
+  });

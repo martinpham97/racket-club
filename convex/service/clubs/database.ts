@@ -64,11 +64,14 @@ export const listMyClubs = async (
     .query("clubMemberships")
     .withIndex("userId", (q) => q.eq("userId", ctx.currentUser._id))
     .paginate(paginationOpts);
-  const clubPromises = memberships.page.map(async (m) => {
-    const club = await ctx.db.get(m.clubId);
-    return club ? ({ ...club, membership: m } as MyClub) : null;
-  });
-  const myClubs = (await Promise.all(clubPromises)).filter(Boolean) as MyClub[];
+  const clubIds = memberships.page.map((m) => m.clubId);
+  const clubs = await Promise.all(clubIds.map((id) => ctx.db.get(id)));
+  const myClubs = memberships.page
+    .map((membership, index) => {
+      const club = clubs[index];
+      return club ? ({ ...club, membership } as MyClub) : null;
+    })
+    .filter(Boolean) as MyClub[];
   return { ...memberships, page: myClubs };
 };
 

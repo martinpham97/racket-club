@@ -2,16 +2,146 @@ import { Id } from "@/convex/_generated/dataModel";
 import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { SESSION_STATUS } from "@/convex/constants/sessions";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { PaginationOptions, PaginationResult } from "convex/server";
 import { nanoid } from "nanoid";
-import { baseSessionSchema, SessionInstance, SessionTemplateCreateInput } from "./schemas";
+import {
+  baseSessionSchema,
+  SessionInstance,
+  SessionInstanceDetails,
+  SessionParticipant,
+  SessionTemplate,
+  SessionTemplateCreateInput,
+} from "./schemas";
+
+/**
+ * Filter criteria for querying session instances by date range
+ */
+export interface ListSessionInstancesFilters {
+  fromDate: number;
+  toDate: number;
+}
+
+/**
+ * Retrieves all session templates for a specific club
+ * @param ctx - Query context for database operations
+ * @param clubId - Unique identifier of the club
+ * @param pagination - Pagination options for result set
+ * @returns Paginated list of session templates belonging to the club
+ */
+export const listSessionTemplatesForClub = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+  pagination: PaginationOptions,
+): Promise<PaginationResult<SessionTemplate>> => {
+  return await ctx.db
+    .query("sessionTemplates")
+    .withIndex("clubId", (q) => q.eq("clubId", clubId))
+    .paginate(pagination);
+};
+
+/**
+ * Retrieves session instances for a specific club within a date range
+ * @param ctx - Query context for database operations
+ * @param clubId - Unique identifier of the club
+ * @param filters - Date range filters for session instances
+ * @param pagination - Pagination options for result set
+ * @returns Paginated list of session instances for the club, ordered by date ascending
+ */
+export const listSessionInstancesForClub = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+  filters: ListSessionInstancesFilters,
+  pagination: PaginationOptions,
+): Promise<PaginationResult<SessionInstance>> => {
+  const sessions = await ctx.db
+    .query("sessionInstances")
+    .withIndex("clubIdInstanceDate", (q) =>
+      q
+        .eq("clubId", clubId)
+        .gte("instanceDate", filters.fromDate)
+        .lte("instanceDate", filters.toDate),
+    )
+    .order("asc")
+    .paginate(pagination);
+  return sessions;
+};
+
+/**
+ * Retrieves session instances where a specific user is participating
+ * @param ctx - Query context for database operations
+ * @param userId - Unique identifier of the user
+ * @param filters - Date range filters for session instances
+ * @param pagination - Pagination options for result set
+ * @returns Paginated list of session instances with participation details where user is registered
+ */
+export const listParticipatingSessionInstances = async (
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  filters: ListSessionInstancesFilters,
+  pagination: PaginationOptions,
+): Promise<PaginationResult<SessionInstanceDetails>> => {
+  const userParticipations = await ctx.db
+    .query("sessionParticipants")
+    .withIndex("userIdInstanceDate", (q) =>
+      q
+        .eq("userId", userId)
+        .gte("instanceDate", filters.fromDate)
+        .lte("instanceDate", filters.toDate),
+    )
+    .paginate(pagination);
+  const sessionIds = userParticipations.page.map((p) => p.sessionInstanceId);
+  const sessions = await Promise.all(sessionIds.map((id) => ctx.db.get(id)));
+  const sessionsWithParticipation = userParticipations.page
+    .map((participation, index) => {
+      const session = sessions[index];
+      return session ? { ...session, participation } : null;
+    })
+    .filter(Boolean) as SessionInstanceDetails[];
+  return { ...userParticipations, page: sessionsWithParticipation };
+};
+
+/**
+ * Retrieves all participation records for a specific user in a session instance
+ * @param ctx - Query context for database operations
+ * @param sessionInstanceId - Unique identifier of the session instance
+ * @param userId - Unique identifier of the user
+ * @returns Array of session participation records for the user in the specified session
+ */
+export const listSessionParticipationsForUser = async (
+  ctx: QueryCtx,
+  sessionInstanceId: Id<"sessionInstances">,
+  userId: Id<"users">,
+): Promise<Array<SessionParticipant>> => {
+  return await ctx.db
+    .query("sessionParticipants")
+    .withIndex("instanceUser", (q) =>
+      q.eq("sessionInstanceId", sessionInstanceId).eq("userId", userId),
+    )
+    .collect();
+};
+
+/**
+ * Retrieves all participants for a specific session instance
+ * @param ctx - Query context for database operations
+ * @param sessionInstanceId - Unique identifier of the session instance
+ * @returns Array of all session participation records for the specified session
+ */
+export const listAllSessionParticipants = async (
+  ctx: QueryCtx,
+  sessionInstanceId: Id<"sessionInstances">,
+): Promise<Array<SessionParticipant>> => {
+  return await ctx.db
+    .query("sessionParticipants")
+    .withIndex("sessionInstanceId", (q) => q.eq("sessionInstanceId", sessionInstanceId))
+    .collect();
+};
 
 /**
  * Retrieves a session instance for a specific template and date
- *
- * @param ctx - Query context
+ * @param ctx - Query context for database operations
  * @param sessionTemplateId - Unique identifier of the session template
  * @param date - Unix timestamp in milliseconds for the instance date
- * @returns Promise resolving to the session instance if found, null otherwise
+ * @returns Session instance if found, null otherwise
  */
 export const getSessionInstanceAtDate = async (
   ctx: QueryCtx,
@@ -65,7 +195,7 @@ export const createSessionTemplate = async (
  *
  * **Automatic Fields Added:**
  * - `sessionTemplateId`: Links instance to its parent template
- * - `timeslots`: Each timeslot gets a unique ID generated with nanoid
+ * - `timeslots`: Each timeslot gets a unique ID and participant counts initialized
  * - `instanceDate`: Set to the provided date
  * - `status`: Initialized to NOT_STARTED
  */
@@ -78,7 +208,12 @@ export const createSessionInstance = async (
   return await ctx.db.insert("sessionInstances", {
     ...baseSessionSchema.parse(sessionTemplate),
     sessionTemplateId,
-    timeslots: sessionTemplate.timeslots.map((ts) => ({ ...ts, id: nanoid() })),
+    timeslots: sessionTemplate.timeslots.map((ts) => ({
+      ...ts,
+      id: nanoid(),
+      numParticipants: ts.permanentParticipants.length,
+      numWaitlisted: 0,
+    })),
     instanceDate,
     status: SESSION_STATUS.NOT_STARTED,
   });
