@@ -5,6 +5,7 @@ import {
   getClub,
   getClubBanRecordForUser,
   getClubMembershipForUser,
+  listAllClubMembers,
   listMyClubs,
   listPublicClubs,
   updateClub,
@@ -278,6 +279,29 @@ describe("Club Database Service", () => {
 
       expect(mockCtx.db.delete).not.toHaveBeenCalled();
       expect(mockCtx.db.patch).toHaveBeenCalledWith(clubId, { numMembers: 0 });
+    });
+  });
+
+  describe("listAllClubMembers", () => {
+    it("returns all members for a club", async () => {
+      const clubId = genId<"clubs">("clubs");
+      const membership1 = createTestClubMembershipRecord(clubId, genId<"users">("users"));
+      const membership2 = createTestClubMembershipRecord(clubId, genId<"users">("users"));
+      const memberships = [membership1, membership2];
+
+      const mockQuery = {
+        withIndex: vi.fn(() => ({
+          collect: vi.fn().mockResolvedValueOnce(memberships),
+        })),
+      };
+      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
+        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
+      );
+
+      const result = await listAllClubMembers(mockCtx, clubId);
+
+      expect(result).toEqual(memberships);
+      expect(mockCtx.db.query).toHaveBeenCalledWith("clubMemberships");
     });
   });
 

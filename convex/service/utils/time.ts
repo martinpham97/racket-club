@@ -19,7 +19,7 @@ import { fromZonedTime, toZonedTime } from "date-fns-tz";
  *
  * @example
  * ```typescript
- * // Calculate session duration
+ * // Calculate event duration
  * const duration = getTimeDurationInMinutes("09:30", "11:45");
  * console.log(duration); // 135 (2 hours 15 minutes)
  *
@@ -70,12 +70,12 @@ export const getTimeDurationInMinutes = (startTime: string, endTime: string): nu
  *
  * @example
  * ```typescript
- * // Convert session start time to UTC for database storage
- * const sessionDate = Date.now();
+ * // Convert event start time to UTC for database storage
+ * const eventDate = Date.now();
  * const startTimeUtc = getUtcTimestampFromZonedTime(
  *   "09:00",
  *   "America/Los_Angeles",
- *   sessionDate
+ *   eventDate
  * );
  * ```
  */

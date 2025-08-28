@@ -65,9 +65,9 @@ interface AddUserToClubOptions {
   membershipInfo?: ClubMembershipInput;
 }
 
-/**
- * Club queries
- */
+// ============================================================================
+// QUERY FUNCTIONS
+// ============================================================================
 
 /**
  * Lists all public and approved clubs with pagination.
@@ -124,9 +124,9 @@ export const listClubActivities = authenticatedQueryWithRLS()({
   },
 });
 
-/**
- * Club mutations
- */
+// ============================================================================
+// MUTATION FUNCTIONS
+// ============================================================================
 
 /**
  * Allows an authenticated user to join a club with membership details.
@@ -289,10 +289,6 @@ export const deleteClub = authenticatedMutationWithRLS()({
     ]);
   },
 });
-
-/**
- * Membership mutations
- */
 
 /**
  * Updates a club membership. Only club owner, club admin, or system admin can modify memberships.
@@ -519,9 +515,9 @@ export const listClubBans = authenticatedQueryWithRLS()({
   },
 });
 
-/**
- * Helper functions
- */
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 /**
  * Creates an activity record for club-related actions.

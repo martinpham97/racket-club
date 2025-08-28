@@ -11,8 +11,8 @@
 import type * as auth from "../auth.js";
 import type * as constants_activities from "../constants/activities.js";
 import type * as constants_errors from "../constants/errors.js";
+import type * as constants_events from "../constants/events.js";
 import type * as constants_rateLimitConfig from "../constants/rateLimitConfig.js";
-import type * as constants_sessions from "../constants/sessions.js";
 import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
 import type * as myFunctions from "../myFunctions.js";
@@ -21,9 +21,9 @@ import type * as service_activities_schemas from "../service/activities/schemas.
 import type * as service_clubs_database from "../service/clubs/database.js";
 import type * as service_clubs_functions from "../service/clubs/functions.js";
 import type * as service_clubs_schemas from "../service/clubs/schemas.js";
-import type * as service_sessions_database from "../service/sessions/database.js";
-import type * as service_sessions_functions from "../service/sessions/functions.js";
-import type * as service_sessions_schemas from "../service/sessions/schemas.js";
+import type * as service_events_database from "../service/events/database.js";
+import type * as service_events_functions from "../service/events/functions.js";
+import type * as service_events_schemas from "../service/events/schemas.js";
 import type * as service_users_database from "../service/users/database.js";
 import type * as service_users_functions from "../service/users/functions.js";
 import type * as service_users_schemas from "../service/users/schemas.js";
@@ -35,9 +35,9 @@ import type * as service_utils_rateLimit from "../service/utils/rateLimit.js";
 import type * as service_utils_time from "../service/utils/time.js";
 import type * as service_utils_validators_auth from "../service/utils/validators/auth.js";
 import type * as service_utils_validators_clubs from "../service/utils/validators/clubs.js";
+import type * as service_utils_validators_events from "../service/utils/validators/events.js";
 import type * as service_utils_validators_profile from "../service/utils/validators/profile.js";
 import type * as service_utils_validators_rateLimit from "../service/utils/validators/rateLimit.js";
-import type * as service_utils_validators_sessions from "../service/utils/validators/sessions.js";
 
 import type {
   ApiFromModules,
@@ -57,8 +57,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   "constants/activities": typeof constants_activities;
   "constants/errors": typeof constants_errors;
+  "constants/events": typeof constants_events;
   "constants/rateLimitConfig": typeof constants_rateLimitConfig;
-  "constants/sessions": typeof constants_sessions;
   http: typeof http;
   migrations: typeof migrations;
   myFunctions: typeof myFunctions;
@@ -67,9 +67,9 @@ declare const fullApi: ApiFromModules<{
   "service/clubs/database": typeof service_clubs_database;
   "service/clubs/functions": typeof service_clubs_functions;
   "service/clubs/schemas": typeof service_clubs_schemas;
-  "service/sessions/database": typeof service_sessions_database;
-  "service/sessions/functions": typeof service_sessions_functions;
-  "service/sessions/schemas": typeof service_sessions_schemas;
+  "service/events/database": typeof service_events_database;
+  "service/events/functions": typeof service_events_functions;
+  "service/events/schemas": typeof service_events_schemas;
   "service/users/database": typeof service_users_database;
   "service/users/functions": typeof service_users_functions;
   "service/users/schemas": typeof service_users_schemas;
@@ -81,9 +81,9 @@ declare const fullApi: ApiFromModules<{
   "service/utils/time": typeof service_utils_time;
   "service/utils/validators/auth": typeof service_utils_validators_auth;
   "service/utils/validators/clubs": typeof service_utils_validators_clubs;
+  "service/utils/validators/events": typeof service_utils_validators_events;
   "service/utils/validators/profile": typeof service_utils_validators_profile;
   "service/utils/validators/rateLimit": typeof service_utils_validators_rateLimit;
-  "service/utils/validators/sessions": typeof service_utils_validators_sessions;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

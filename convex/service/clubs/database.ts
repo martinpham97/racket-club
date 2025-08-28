@@ -64,14 +64,14 @@ export const listMyClubs = async (
     .query("clubMemberships")
     .withIndex("userId", (q) => q.eq("userId", ctx.currentUser._id))
     .paginate(paginationOpts);
-  const clubIds = memberships.page.map((m) => m.clubId);
-  const clubs = await Promise.all(clubIds.map((id) => ctx.db.get(id)));
-  const myClubs = memberships.page
-    .map((membership, index) => {
-      const club = clubs[index];
-      return club ? ({ ...club, membership } as MyClub) : null;
-    })
-    .filter(Boolean) as MyClub[];
+  const myClubs = (
+    await Promise.all(
+      memberships.page.map(async (membership) => {
+        const club = await ctx.db.get(membership.clubId); // or whatever property contains the club ID
+        return club ? ({ ...club, membership } as MyClub) : null;
+      }),
+    )
+  ).filter(Boolean) as MyClub[];
   return { ...memberships, page: myClubs };
 };
 
@@ -123,6 +123,22 @@ export const deleteAllClubMemberships = async (
     .collect();
   memberships.forEach(async (membership) => await ctx.db.delete(membership._id));
   await ctx.db.patch(clubId, { numMembers: 0 });
+};
+
+/**
+ * Lists all members for a specific club.
+ * @param ctx Query context
+ * @param clubId Club ID to get members for
+ * @returns Array of club memberships
+ */
+export const listAllClubMembers = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+): Promise<ClubMembership[]> => {
+  return await ctx.db
+    .query("clubMemberships")
+    .withIndex("clubUser", (q) => q.eq("clubId", clubId))
+    .collect();
 };
 
 /**

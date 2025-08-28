@@ -1,4 +1,4 @@
-import { MAX_PARTICIPANTS, MIN_PARTICIPANTS } from "./sessions";
+import { MAX_PARTICIPANTS, MIN_PARTICIPANTS } from "./events";
 
 export const AUTH_ACCESS_DENIED_ERROR = "You do not have access to perform this action.";
 
@@ -52,42 +52,40 @@ export const CLUB_USER_BANNED_ERROR = "You are banned from this club.";
 
 export const CLUB_USER_NOT_BANNED_ERROR = "This user is not banned from the club.";
 
-export const SESSION_ALREADY_JOINED_ERROR = "You have already joined this session.";
+export const EVENT_ALREADY_JOINED_ERROR = "You have already joined this event.";
 
-export const SESSION_ALREADY_STARTED_ERROR = "This session has already started.";
+export const EVENT_ALREADY_STARTED_ERROR = "This event has already started.";
 
-export const SESSION_BANNED_USER_ERROR = "You are banned from this club and cannot join sessions.";
+export const EVENT_BANNED_USER_ERROR = "You are banned from this club and cannot join events.";
 
-export const SESSION_DUPLICATE_JOIN_ERROR = "Cannot join the same session twice.";
+export const EVENT_DUPLICATE_JOIN_ERROR = "Cannot join the same event twice.";
 
-export const SESSION_DUPLICATE_LEAVE_ERROR = "Cannot leave the same session twice.";
+export const EVENT_DUPLICATE_LEAVE_ERROR = "Cannot leave the same event twice.";
 
-export const SESSION_FULL_ERROR = "This session is full.";
+export const EVENT_FULL_ERROR = "This event is full.";
 
-export const SESSION_GRACE_TIME_EXPIRED_ERROR =
-  "Grace time has expired. You cannot leave this session.";
+export const EVENT_GRACE_TIME_EXPIRED_ERROR =
+  "Grace time has expired. You cannot leave this event.";
 
-export const SESSION_INVALID_SCHEDULE_ERROR = "Invalid session schedule.";
+export const EVENT_INVALID_SCHEDULE_ERROR = "Invalid event schedule.";
 
-export const SESSION_LEVEL_MISMATCH_ERROR =
-  "Your skill level does not match the session requirements.";
+export const EVENT_LEVEL_MISMATCH_ERROR = "Your skill level does not match the event requirements.";
 
-export const SESSION_NOT_FOUND_ERROR = "This session does not exist.";
+export const EVENT_NOT_FOUND_ERROR = "This event does not exist.";
 
-export const SESSION_NOT_JOINED_ERROR = "You have not joined this session.";
+export const EVENT_NOT_JOINED_ERROR = "You have not joined this event.";
 
-export const SESSION_UNAUTHORIZED_ERROR = "You are not authorized to manage this session.";
+export const EVENT_UNAUTHORIZED_ERROR = "You are not authorized to manage this event.";
 
-export const SESSION_VISIBILITY_ERROR = "You cannot access this session.";
+export const EVENT_VISIBILITY_ERROR = "You cannot access this event.";
 
-export const SESSION_DATE_FUTURE_ERROR = "Date must be in the future.";
-export const SESSION_DATE_REQUIRED_ONE_TIME_ERROR = "Date is required for one-time sessions.";
-export const SESSION_DAY_OF_MONTH_REQUIRED_ERROR = "Day of month is required for monthly sessions.";
-export const SESSION_DAY_OF_WEEK_REQUIRED_ERROR = "Day of week is required for weekly sessions.";
-export const SESSION_END_DATE_AFTER_START_ERROR = "End date must be after start date.";
-export const SESSION_INVALID_RECURRENCE_ERROR = "Invalid session recurrence setting.";
-export const SESSION_SCHEDULE_REQUIRED_ERROR = "Schedule is required.";
-export const SESSION_START_DATE_FUTURE_ERROR = "Start date must be in the future.";
+export const EVENT_DATE_FUTURE_ERROR = "Date must be in the future.";
+export const EVENT_DAY_OF_MONTH_REQUIRED_ERROR = "Day of month is required for monthly events.";
+export const EVENT_DAY_OF_WEEK_REQUIRED_ERROR = "Day of week is required for weekly events.";
+export const EVENT_END_DATE_AFTER_START_ERROR = "End date must be after start date.";
+export const EVENT_INVALID_RECURRENCE_ERROR = "Invalid event recurrence setting.";
+export const EVENT_SCHEDULE_REQUIRED_ERROR = "Schedule is required.";
+export const EVENT_START_DATE_FUTURE_ERROR = "Start date must be in the future.";
 
 export const TIMESLOT_DURATION_REQUIRED_ERROR = "Duration is required for duration-type timeslots.";
 export const TIMESLOT_START_END_REQUIRED_ERROR =
@@ -102,62 +100,58 @@ export const TIME_FORMAT_ERROR =
 export const TIMESLOT_DURATION_MORE_THAN_24_HOURS_ERROR =
   "Timeslot duration must be under 24 hours.";
 export const TIMESLOT_DURATION_NOT_MATCH_SCHEDULE_ERROR =
-  "Timeslot duration must be within the session's time range.";
+  "Timeslot duration must be within the event's time range.";
 
 export const TIMESLOT_MAX_PARTICIPANTS_EXCEEDED_ERROR =
-  "Total max participants for all timeslots exceeds maximum 100 participants per session.";
+  "Total max participants for all timeslots exceeds maximum 100 participants per event.";
 
 export const TIMESLOT_PERMANENT_PARTICIPANTS_EXCEEDED_MAX_ERROR =
   "The number of participants for this timeslot cannot exceed the timeslot maximum participants.";
 
 export const TIMESLOT_TIME_RANGE_NOT_MATCH_SCHEDULE_ERROR =
-  "Timeslot time range must be within the session's time range.";
+  "Timeslot time range must be within the event's time range.";
 
-export const SESSION_VISIBILITY_CANNOT_BE_PUBLIC_ERROR =
-  "Session visibility cannot be public as this club is a private club.";
+export const EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR =
+  "Event visibility cannot be public as this club is a private club.";
 
-export const SESSION_GENERATION_WINDOW_ERROR =
+export const EVENT_GENERATION_WINDOW_ERROR =
   "Target date is outside the allowed generation window.";
-export const SESSION_INSTANCE_ALREADY_EXISTS_ERROR =
-  "Session instance already exists for this date.";
-export const SESSION_RECURRENCE_MISMATCH_ERROR =
-  "Target date does not match template recurrence pattern.";
-export const SESSION_TEMPLATE_DISABLED_ERROR = "Session template is disabled or cancelled.";
-export const SESSION_TEMPLATE_INACTIVE_ERROR =
-  "Session template is not active for the target date.";
+export const EVENT_ALREADY_EXISTS_ERROR = "Event already exists for this date.";
+export const EVENT_RECURRENCE_MISMATCH_ERROR =
+  "Target date does not match series recurrence pattern.";
+export const EVENT_SERIES_INACTIVE_ERROR = "Event series is not active for the target date.";
 
-export const SESSION_INVALID_TIMEZONE_ERROR = "Invalid time zone specified.";
+export const EVENT_INVALID_TIMEZONE_ERROR = "Invalid time zone specified.";
 
 export const DB_ITEM_NOT_FOUND_ERROR_TEMPLATE = "{item} could not be found or does not exist.";
 
-export const SESSION_CANNOT_GENERATE_INSTANCE_DUE_TO_INACTIVE_STATUS_ERROR =
-  "Unable to generate sessions due to inactive status.";
+export const EVENT_CANNOT_GENERATE_DUE_TO_INACTIVE_STATUS_ERROR =
+  "Unable to generate events due to inactive status.";
 
-export const SESSION_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR =
-  "Unable to join or leave session as it has already started or been cancelled.";
+export const EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR =
+  "Unable to join or leave event as it has already started or been cancelled.";
 
-export const SESSION_DATE_TOO_FAR_IN_FUTURE_ERROR =
-  "Session starting date is too far in the future. Please keep the session starting date within 30 days from now.";
+export const EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR =
+  "Event starting date is too far in the future. Please keep the event starting date within 30 days from now.";
 
-export const SESSION_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE =
-  "{parameter} is not allowed for {recurrence} sessions.";
+export const EVENT_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE =
+  "{parameter} is not allowed for {recurrence} events.";
 
-export const SESSION_RECURRING_START_END_DATE_REQUIRED_ERROR =
-  "Recurring sessions require start date and end date.";
+export const EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR =
+  "Recurring events require start date and end date.";
 
-export const SESSION_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR = "At least one timeslot is required.";
+export const EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR = "At least one timeslot is required.";
 
-export const SESSION_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR = `Fee is required when charging a fixed amount.`;
+export const EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR = `Fee is required when charging a fixed amount.`;
 
-export const SESSION_TIMESLOT_FULL_ERROR =
-  "This session timeslot is full and waitlist is also full.";
+export const EVENT_TIMESLOT_FULL_ERROR = "This event timeslot is full and waitlist is also full.";
 
-export const SESSION_TIMESLOT_INVALID_ID_ERROR = "Invalid timeslot ID provided.";
+export const EVENT_TIMESLOT_INVALID_ID_ERROR = "Invalid timeslot ID provided.";
 
-export const SESSION_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR = `Max participants must be between ${MIN_PARTICIPANTS} and ${MAX_PARTICIPANTS}.`;
+export const EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR = `Max participants must be between ${MIN_PARTICIPANTS} and ${MAX_PARTICIPANTS}.`;
 
-export const SESSION_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR =
+export const EVENT_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR =
   "Every permanent participant must be a club member.";
 
-export const SESSION_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR =
+export const EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR =
   "Permanent participants must be unique.";
