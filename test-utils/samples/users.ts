@@ -43,8 +43,12 @@ export const createTestProfileRecord = (
   };
 };
 
+export const generateTestEmail = (prefix = "test"): string => {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}@example.com`;
+};
+
 export const createTestUser = (overrides?: Partial<User>): WithoutSystemFields<User> => {
-  return { email: "test@example.com", ...overrides };
+  return { email: generateTestEmail(), ...overrides };
 };
 
 export const createTestUserRecord = <T extends CreateTestUserArgs>(
@@ -62,10 +66,14 @@ export const createTestUserRecord = <T extends CreateTestUserArgs>(
 export class UserTestHelpers {
   constructor(private t: TestConvex<typeof schema>) {}
 
-  async insertUser(email = "test@example.com") {
+  async insertUser(email = generateTestEmail()) {
     return await this.t.run(async (ctx) => {
       return await ctx.db.insert("users", { email });
     });
+  }
+
+  async deleteUser(userId: Id<"users">) {
+    return await this.t.run(async (ctx) => ctx.db.delete(userId));
   }
 
   async insertProfile(profile: WithoutSystemFields<UserProfile>) {

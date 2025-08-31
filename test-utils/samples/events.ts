@@ -11,17 +11,18 @@ import {
 import schema from "@/convex/schema";
 import {
   Event,
+  EventCreateInput,
   EventParticipant,
   EventSeries,
   EventSeriesCreateInput,
   Timeslot,
-  TimeslotSeries,
+  TimeslotInput,
 } from "@/convex/service/events/schemas";
 import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
 
-export const createTestTimeslotSeries = (overrides?: Partial<TimeslotSeries>): TimeslotSeries => ({
+export const createTestTimeslotInput = (overrides?: Partial<TimeslotInput>): TimeslotInput => ({
   name: "Test Timeslot",
   type: TIMESLOT_TYPE.DURATION,
   duration: 60,
@@ -34,7 +35,7 @@ export const createTestTimeslotSeries = (overrides?: Partial<TimeslotSeries>): T
 });
 
 export const createTestTimeslot = (overrides?: Partial<Timeslot>): Timeslot => ({
-  ...createTestTimeslotSeries(overrides),
+  ...createTestTimeslotInput(overrides),
   id: "test-timeslot-id",
   numParticipants: 0,
   numWaitlisted: 0,
@@ -55,9 +56,9 @@ export const createTestEventSeriesInput = (
     timezone: "America/New_York",
   },
   type: EVENT_TYPE.SOCIAL,
+  startTime: "09:00",
+  endTime: "11:00",
   schedule: {
-    startTime: "09:00",
-    endTime: "11:00",
     dayOfWeek: 1,
     startDate: Date.now() + 60 * 60 * 1000,
     endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
@@ -69,8 +70,35 @@ export const createTestEventSeriesInput = (
     max: 5,
   },
   recurrence: EVENT_RECURRENCE.WEEKLY,
-  timeslots: [createTestTimeslotSeries()],
+  timeslots: [createTestTimeslotInput()],
   isActive: true,
+  ...overrides,
+});
+
+export const createTestEventInput = (
+  clubId: Id<"clubs">,
+  overrides?: Partial<EventCreateInput>,
+): EventCreateInput => ({
+  clubId,
+  name: "Test Event",
+  description: "Test event description",
+  location: {
+    name: "Test Court",
+    placeId: "test-place-id",
+    address: "123 Test St",
+    timezone: "America/New_York",
+  },
+  type: EVENT_TYPE.SOCIAL,
+  startTime: "09:00",
+  endTime: "11:00",
+  date: Date.now() + 24 * 60 * 60 * 1000,
+  paymentType: PAYMENT_TYPE.CASH,
+  visibility: EVENT_VISIBILITY.PUBLIC,
+  levelRange: {
+    min: 1,
+    max: 5,
+  },
+  timeslots: [createTestTimeslotInput()],
   ...overrides,
 });
 
@@ -99,6 +127,7 @@ export const createTestEventSeriesRecord = (
 export const createTestEvent = (
   eventSeriesId: Id<"eventSeries">,
   clubId: Id<"clubs">,
+  createdBy: Id<"users">,
   date: number,
   overrides?: Partial<Event>,
 ): WithoutSystemFields<Event> => ({
@@ -113,11 +142,8 @@ export const createTestEvent = (
     timezone: "America/New_York",
   },
   type: EVENT_TYPE.SOCIAL,
-  schedule: {
-    startTime: "09:00",
-    endTime: "11:00",
-    dayOfWeek: 1,
-  },
+  startTime: "09:00",
+  endTime: "11:00",
   paymentType: PAYMENT_TYPE.CASH,
   visibility: EVENT_VISIBILITY.PUBLIC,
   levelRange: {
@@ -129,18 +155,20 @@ export const createTestEvent = (
   status: EVENT_STATUS.NOT_STARTED,
   createdAt: Date.now(),
   modifiedAt: Date.now(),
+  createdBy,
   ...overrides,
 });
 
 export const createTestEventRecord = (
   eventSeriesId: Id<"eventSeries">,
   clubId: Id<"clubs">,
+  createdBy: Id<"users">,
   date: number,
   overrides?: Partial<Event>,
 ): Event => ({
   _id: genId<"events">("events"),
   _creationTime: Date.now(),
-  ...createTestEvent(eventSeriesId, clubId, date, overrides),
+  ...createTestEvent(eventSeriesId, clubId, createdBy, date, overrides),
 });
 
 export const createTestEventParticipant = (

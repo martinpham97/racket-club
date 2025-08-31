@@ -2,6 +2,7 @@ import { QueryCtx } from "@/convex/_generated/server";
 import {
   END_TIME_AFTER_START_ERROR,
   EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR,
+  EVENT_DATE_FUTURE_ERROR,
   EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
   EVENT_DAY_OF_MONTH_REQUIRED_ERROR,
   EVENT_DAY_OF_WEEK_REQUIRED_ERROR,
@@ -36,13 +37,14 @@ import { listAllClubMembers } from "@/convex/service/clubs/database";
 import { Club, ClubMembership } from "@/convex/service/clubs/schemas";
 import {
   Event,
+  EventCreateInput,
   EventRecurrence,
   EventSchedule,
   EventSeries,
   EventSeriesCreateInput,
   EventSeriesUpdateInput,
   EventVisibility,
-  TimeslotSeries,
+  TimeslotInput,
 } from "@/convex/service/events/schemas";
 import { getTimeDurationInMinutes } from "@/convex/service/utils/time";
 import { ConvexError } from "convex/values";
@@ -57,7 +59,6 @@ import format from "string-template";
  * @param club - Club object to validate against
  *
  * @throws {ConvexError} EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR - When private club tries to create public event
- * @throws {ConvexError} EVENT_SCHEDULE_REQUIRED_ERROR - When schedule object is missing
  * @throws {ConvexError} END_TIME_AFTER_START_ERROR - When event startTime is not before endTime
  *
  * **DAILY Events:**
@@ -109,11 +110,51 @@ export const validateEventSeriesForCreate = async (
   eventSeries: EventSeriesCreateInput,
   club: Club,
 ): Promise<void> => {
-  const { recurrence, schedule, timeslots, visibility } = eventSeries;
+  const { recurrence, schedule, startTime, endTime, timeslots, visibility } = eventSeries;
   validateEventVisibility(club, visibility);
+  validateEventTime(startTime, endTime);
   validateEventSchedule(schedule, recurrence);
   const clubMembers = await listAllClubMembers(ctx, club._id);
-  validateEventTimeslots(schedule, timeslots, clubMembers);
+  validateEventTimeslots(startTime, endTime, timeslots, clubMembers);
+};
+
+/**
+ * Validates single event for creation with club context
+ * @param ctx - Query context
+ * @param event - Event input object containing date, times, and visibility
+ * @param club - Club object to validate against
+ * @throws {ConvexError} EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR - When private club tries to create public event
+ * @throws {ConvexError} END_TIME_AFTER_START_ERROR - When startTime is not before endTime
+ * @throws {ConvexError} EVENT_DATE_FUTURE_ERROR - When date is not in the future
+ * @throws {ConvexError} EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR - When date is too far in the future
+ */
+export const validateEventForCreate = async (
+  ctx: QueryCtx,
+  event: EventCreateInput,
+  club: Club,
+): Promise<void> => {
+  const { date, startTime, endTime, timeslots, visibility } = event;
+  validateEventVisibility(club, visibility);
+  validateEventTime(startTime, endTime);
+  validateEventDate(date);
+  const clubMembers = await listAllClubMembers(ctx, club._id);
+  validateEventTimeslots(startTime, endTime, timeslots, clubMembers);
+};
+
+/**
+ * Validates event date is in future and not too far ahead
+ * @param date - Event date as Unix timestamp
+ * @throws {ConvexError} EVENT_DATE_FUTURE_ERROR - When date is not in the future
+ * @throws {ConvexError} EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR - When date exceeds maximum allowed days from now
+ */
+export const validateEventDate = (date: number): void => {
+  const now = Date.now();
+  if (date <= now) {
+    throw new ConvexError(EVENT_DATE_FUTURE_ERROR);
+  }
+  if (Math.abs(differenceInDays(now, date)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
+    throw new ConvexError(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
+  }
 };
 
 /**
@@ -122,7 +163,7 @@ export const validateEventSeriesForCreate = async (
  * @param eventVisibility - Desired event visibility level
  * @throws {ConvexError} When private club tries to create public event
  */
-export const validateEventVisibility = (club: Club, eventVisibility: EventVisibility) => {
+export const validateEventVisibility = (club: Club, eventVisibility: EventVisibility): void => {
   if (!club.isPublic && eventVisibility === EVENT_VISIBILITY.PUBLIC) {
     throw new ConvexError(EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR);
   }
@@ -150,6 +191,18 @@ export const validateRecurringSchedule = (schedule: EventSchedule): void => {
 };
 
 /**
+ * Validates that start time is before end time
+ * @param startTime - Event start time in HH:MM format
+ * @param endTime - Event end time in HH:MM format
+ * @throws {ConvexError} END_TIME_AFTER_START_ERROR - When startTime is not before endTime
+ */
+export const validateEventTime = (startTime: string, endTime: string): void => {
+  if (startTime >= endTime) {
+    throw new ConvexError(END_TIME_AFTER_START_ERROR);
+  }
+};
+
+/**
  * Validates event schedule based on recurrence type
  * @param schedule - Event schedule object with times and dates
  * @param recurrence - Type of recurrence (DAILY, WEEKLY, MONTHLY)
@@ -159,36 +212,13 @@ export const validateEventSchedule = (
   schedule: EventSchedule,
   recurrence: EventRecurrence,
 ): void => {
-  if (schedule.startTime >= schedule.endTime) {
-    throw new ConvexError(END_TIME_AFTER_START_ERROR);
-  }
-
   const throwUnnecessaryParameterError = (parameter: string, recurrence: string): void => {
     throw new ConvexError(
       format(EVENT_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE, { parameter, recurrence }),
     );
   };
 
-  // const now = Date.now();
-
   switch (recurrence) {
-    // case EVENT_RECURRENCE.ONE_TIME:
-    //   if (schedule.date === undefined) {
-    //     throw new ConvexError(EVENT_DATE_REQUIRED_ONE_TIME_ERROR);
-    //   }
-    //   if (schedule.date <= now) {
-    //     throw new ConvexError(EVENT_DATE_FUTURE_ERROR);
-    //   }
-    //   if (Math.abs(differenceInDays(now, schedule.date)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
-    //     throw new ConvexError(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
-    //   }
-    //   if (schedule.startDate ) throwUnnecessaryParameterError("startDate", "one-time");
-    //   if (schedule.endDate ) throwUnnecessaryParameterError("endDate", "one-time");
-    //   if (schedule.dayOfWeek ) throwUnnecessaryParameterError("dayOfWeek", "one-time");
-    //   if (schedule.dayOfMonth )
-    //     throwUnnecessaryParameterError("dayOfMonth", "one-time");
-    //   break;
-
     case EVENT_RECURRENCE.DAILY:
       validateRecurringSchedule(schedule);
       if (schedule.dayOfWeek) throwUnnecessaryParameterError("dayOfWeek", "daily");
@@ -217,8 +247,9 @@ export const validateEventSchedule = (
 
 /**
  * Validates event timeslots against schedule and constraints
- * @param schedule - Event schedule for time range validation
- * @param timeslots - Array of timeslot seriess to validate
+ * @param startTime - Event start time
+ * @param endTime - Event end time
+ * @param timeslots - Array of timeslots to validate
  * @param clubMembers - Array of club memberships
  * @throws {ConvexError} EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR - When no timeslots provided
  * @throws {ConvexError} EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR - When maxParticipants <= 0
@@ -234,8 +265,9 @@ export const validateEventSchedule = (
  * @throws {ConvexError} TIMESLOT_MAX_PARTICIPANTS_EXCEEDED_ERROR - When total participants across all timeslots exceed limit
  */
 export const validateEventTimeslots = (
-  schedule: EventSchedule,
-  timeslots: Array<TimeslotSeries>,
+  startTime: string,
+  endTime: string,
+  timeslots: Array<TimeslotInput>,
   clubMembers: Array<ClubMembership>,
 ): void => {
   if (timeslots.length === 0) {
@@ -244,48 +276,41 @@ export const validateEventTimeslots = (
 
   const memberUserIds = new Set(clubMembers.map((m) => m.userId));
 
-  timeslots.forEach((timeslotSeries) => {
-    if (timeslotSeries.maxParticipants <= 0) {
+  timeslots.forEach((timeslotInput) => {
+    if (timeslotInput.maxParticipants <= 0) {
       throw new ConvexError(EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR);
     }
 
-    if (timeslotSeries.feeType === FEE_TYPE.FIXED && !timeslotSeries.fee) {
+    if (timeslotInput.feeType === FEE_TYPE.FIXED && !timeslotInput.fee) {
       throw new ConvexError(EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR);
     }
 
-    switch (timeslotSeries.type) {
+    switch (timeslotInput.type) {
       case TIMESLOT_TYPE.DURATION:
-        if (!timeslotSeries.duration) {
+        if (!timeslotInput.duration) {
           throw new ConvexError(TIMESLOT_DURATION_REQUIRED_ERROR);
         }
-        if (
-          timeslotSeries.duration > getTimeDurationInMinutes(schedule.startTime, schedule.endTime)
-        ) {
+        if (timeslotInput.duration > getTimeDurationInMinutes(startTime, endTime)) {
           throw new ConvexError(TIMESLOT_DURATION_NOT_MATCH_SCHEDULE_ERROR);
         }
         break;
       case TIMESLOT_TYPE.START_END:
-        if (!timeslotSeries.startTime || !timeslotSeries.endTime) {
+        if (!timeslotInput.startTime || !timeslotInput.endTime) {
           throw new ConvexError(TIMESLOT_START_END_REQUIRED_ERROR);
         }
-        if (
-          timeslotSeries.startTime < schedule.startTime ||
-          timeslotSeries.endTime > schedule.endTime
-        ) {
+        if (timeslotInput.startTime < startTime || timeslotInput.endTime > endTime) {
           throw new ConvexError(TIMESLOT_TIME_RANGE_NOT_MATCH_SCHEDULE_ERROR);
         }
-        if (timeslotSeries.startTime >= timeslotSeries.endTime) {
-          throw new ConvexError(END_TIME_AFTER_START_ERROR);
-        }
+        validateEventTime(timeslotInput.startTime, timeslotInput.endTime);
         break;
     }
 
-    if (timeslotSeries.permanentParticipants.length > timeslotSeries.maxParticipants) {
+    if (timeslotInput.permanentParticipants.length > timeslotInput.maxParticipants) {
       throw new ConvexError(TIMESLOT_PERMANENT_PARTICIPANTS_EXCEEDED_MAX_ERROR);
     }
 
-    const uniqueParticipants = new Set(timeslotSeries.permanentParticipants);
-    if (uniqueParticipants.size !== timeslotSeries.permanentParticipants.length) {
+    const uniqueParticipants = new Set(timeslotInput.permanentParticipants);
+    if (uniqueParticipants.size !== timeslotInput.permanentParticipants.length) {
       throw new ConvexError(EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR);
     }
 
@@ -302,81 +327,39 @@ export const validateEventTimeslots = (
 /**
  * Validates event series update with club context and partial validation
  * @param ctx - Query context
- * @param eventSeriesUpdate - Partial event series update input
  * @param club - Club object to validate against
  * @param existingSeries - Existing event series for merging data
+ * @param eventSeriesUpdate - Partial event series update input
  */
 export const validateEventSeriesForUpdate = async (
   ctx: QueryCtx,
-  eventSeriesUpdate: EventSeriesUpdateInput,
   club: Club,
   existingEventSeries: EventSeries,
+  eventSeriesUpdate: EventSeriesUpdateInput,
 ): Promise<void> => {
-  const { recurrence, schedule, timeslots, visibility } = eventSeriesUpdate;
+  const { schedule, recurrence, timeslots, visibility, startTime, endTime } = eventSeriesUpdate;
 
   if (visibility) {
     validateEventVisibility(club, visibility);
   }
 
-  if (schedule && recurrence) {
-    validateEventScheduleForUpdate(schedule, recurrence, existingEventSeries.schedule);
-  }
+  const scheduleToUse: EventSchedule = { ...existingEventSeries.schedule, ...schedule };
+  const recurrenceToUse: EventRecurrence = recurrence || existingEventSeries.recurrence;
+  validateEventSchedule(scheduleToUse, recurrenceToUse);
+
+  const startTimeToUse = startTime || existingEventSeries.startTime;
+  const endTimeToUse = endTime || existingEventSeries.endTime;
+  validateEventTime(startTimeToUse, endTimeToUse);
 
   if (timeslots) {
     const clubMembers = await listAllClubMembers(ctx, club._id);
-    const scheduleToUse = schedule || existingEventSeries.schedule;
-    validateEventTimeslots(scheduleToUse, timeslots, clubMembers);
-  }
-};
-
-/**
- * Validates event schedule for updates with partial data
- * @param schedule - Partial event schedule update
- * @param recurrence - Event recurrence type
- * @param existingSchedule - Existing schedule for merging
- */
-export const validateEventScheduleForUpdate = (
-  schedule: Partial<EventSchedule>,
-  recurrence: EventRecurrence,
-  existingSchedule: EventSchedule,
-): void => {
-  const fullSchedule = { ...existingSchedule, ...schedule };
-
-  if (schedule.startTime && schedule.endTime) {
-    if (schedule.startTime >= schedule.endTime) {
-      throw new ConvexError(END_TIME_AFTER_START_ERROR);
-    }
-  }
-
-  const now = Date.now();
-
-  switch (recurrence) {
-    // case EVENT_RECURRENCE.ONE_TIME:
-    //   if (schedule.date  && schedule.date <= now) {
-    //     throw new ConvexError(EVENT_DATE_FUTURE_ERROR);
-    //   }
-    //   break;
-
-    case EVENT_RECURRENCE.DAILY:
-    case EVENT_RECURRENCE.WEEKLY:
-    case EVENT_RECURRENCE.MONTHLY:
-      if (schedule.startDate && schedule.startDate <= now) {
-        throw new ConvexError(EVENT_START_DATE_FUTURE_ERROR);
-      }
-      if (
-        fullSchedule.startDate &&
-        fullSchedule.endDate &&
-        fullSchedule.endDate <= fullSchedule.startDate
-      ) {
-        throw new ConvexError(EVENT_END_DATE_AFTER_START_ERROR);
-      }
-      break;
+    validateEventTimeslots(startTimeToUse, endTimeToUse, timeslots, clubMembers);
   }
 };
 
 /**
  * Validates that a user can join or leave a event based on event status
- * @param event - Event instance to validate
+ * @param event - Event to validate
  * @throws {ConvexError} EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR - When event has already started or completed
  */
 export const validateEventStatusForJoinLeave = (event: Event) => {

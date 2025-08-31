@@ -1,8 +1,5 @@
-"use server";
-
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { PaginationOptions, PaginationResult, WithoutSystemFields } from "convex/server";
 import { Activity, ResourceId } from "./schemas";
 
@@ -59,12 +56,12 @@ export const listActivitiesForUser = async (
 
 /**
  * Creates a new activity.
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param activity Activity creation data
  * @returns ID of the created activity
  */
 export const createActivity = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   activity: WithoutSystemFields<Activity>,
 ): Promise<Id<"activities">> => {
   return await ctx.db.insert("activities", activity);
@@ -72,11 +69,11 @@ export const createActivity = async (
 
 /**
  * Deletes all activities relating to the given resource.
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param resourceId Related resource ID
  */
 export const deleteActivitiesForResource = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   resourceId: ResourceId,
 ): Promise<void> => {
   const activities = await ctx.db

@@ -94,11 +94,9 @@ export type ClubCreateInput = z.infer<typeof clubCreateInputSchema>;
 
 export const clubUpdateInputSchema = clubSchema.partial();
 export type ClubUpdateInput = z.infer<typeof clubUpdateInputSchema>;
-
 export type Club = DocumentByName<DataModel, "clubs">;
 export type ClubMembership = DocumentByName<DataModel, "clubMemberships">;
-
-export type MyClub = DocumentByName<DataModel, "clubs"> & {
+export type ClubDetails = DocumentByName<DataModel, "clubs"> & {
   membership: ClubMembership;
 };
 

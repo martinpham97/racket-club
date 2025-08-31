@@ -1,13 +1,16 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { EVENT_STATUS } from "@/convex/constants/events";
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { filter } from "convex-helpers/server/filter";
 import { PaginationOptions, PaginationResult } from "convex/server";
 import { nanoid } from "nanoid";
+import { createEventFilter } from "./filters";
 import {
-  baseEventSchema,
   Event,
+  EventCreateInput,
+  eventCreateInputSchema,
   EventDetails,
+  EventFilters,
   EventParticipant,
   EventSeries,
   EventSeriesCreateInput,
@@ -55,7 +58,7 @@ export const listEventsForClub = async (
 ): Promise<PaginationResult<Event>> => {
   const events = await ctx.db
     .query("events")
-    .withIndex("clubIdDate", (q) =>
+    .withIndex("clubDate", (q) =>
       q.eq("clubId", clubId).gte("date", filters.fromDate).lte("date", filters.toDate),
     )
     .order("asc")
@@ -147,14 +150,39 @@ export const getEventAtDate = async (
 };
 
 /**
+ * Searches events with optimized filtering and pagination
+ * @param ctx - Query context for database operations
+ * @param query - Optional text search query for event name/description
+ * @param filters - Event filters (date range, clubs, skill level, location)
+ * @param userMemberClubIds - Club IDs where user has membership access
+ * @param pagination - Pagination options for result set
+ * @returns Paginated list of events matching search criteria
+ */
+export const searchEvents = async (
+  ctx: QueryCtx,
+  query: string | undefined,
+  filters: EventFilters,
+  userMemberClubIds: Id<"clubs">[],
+  pagination: PaginationOptions,
+): Promise<PaginationResult<Event>> => {
+  return await filter(
+    ctx.db
+      .query("events")
+      .withIndex("date", (q) => q.gte("date", filters.fromDate).lte("date", filters.toDate))
+      .order("asc"),
+    createEventFilter(query, filters, userMemberClubIds),
+  ).paginate(pagination);
+};
+
+/**
  * Creates a new event series in the database
  *
- * @param ctx - Authenticated context with user profile information
+ * @param ctx - Mutation context for database operations
  * @param eventSeries - Event series data to create
+ * @param createdBy - User ID of the event series creator
  * @returns Promise resolving to the ID of the created event series
  *
  * **Automatic Fields Added:**
- * - `createdBy`: Set to current user's ID
  * - `createdAt`: Set to current timestamp
  * - `modifiedAt`: Set to current timestamp
  *
@@ -162,13 +190,14 @@ export const getEventAtDate = async (
  * Validation should be done before calling this function.
  */
 export const createEventSeries = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   eventSeries: EventSeriesCreateInput,
+  createdBy: Id<"users">,
 ): Promise<Id<"eventSeries">> => {
   const now = Date.now();
   return await ctx.db.insert("eventSeries", {
     ...eventSeries,
-    createdBy: ctx.currentUser._id,
+    createdBy,
     createdAt: now,
     modifiedAt: now,
   });
@@ -203,33 +232,36 @@ export const updateEventSeries = async (
  * Creates a new event from an event series
  *
  * @param ctx - Mutation context for database operations
- * @param eventSeries - Event series data to base the event on
- * @param eventSeriesId - Unique identifier of the parent event series
- * @param date - Unix timestamp in milliseconds for the event date
+ * @param createdBy - Event creator user ID
+ * @param event - Event data to base the event on
+ * @param eventSeriesId - Optional event series ID to link this event to it
  * @returns Promise resolving to the ID of the created event
  *
  * **Automatic Fields Added:**
  * - `eventSeriesId`: Links event to its parent series
  * - `timeslots`: Each timeslot gets a unique ID and participant counts initialized
- * - `date`: Set to the provided date
  * - `status`: Initialized to NOT_STARTED
+ * - `createdAt`: Set to current date/time
+ * - `modifiedAt`: Set to current date/time
  */
 export const createEvent = async (
   ctx: MutationCtx,
-  eventSeries: EventSeriesCreateInput,
-  eventSeriesId: Id<"eventSeries">,
-  date: number,
+  createdBy: Id<"users">,
+  event: EventCreateInput,
+  eventSeriesId?: Id<"eventSeries">,
 ): Promise<Id<"events">> => {
   return await ctx.db.insert("events", {
-    ...baseEventSchema.parse(eventSeries),
+    ...eventCreateInputSchema.parse(event),
     eventSeriesId,
-    timeslots: eventSeries.timeslots.map((ts) => ({
+    timeslots: event.timeslots.map((ts) => ({
       ...ts,
       id: nanoid(),
       numParticipants: ts.permanentParticipants.length,
       numWaitlisted: 0,
     })),
-    date,
     status: EVENT_STATUS.NOT_STARTED,
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+    createdBy,
   });
 };

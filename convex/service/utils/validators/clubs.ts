@@ -140,13 +140,13 @@ export const validateClubJoinability = (club: Club) => {
 /**
  * Validates and returns memberships for bulk operations.
  * Ensures all memberships exist, belong to the same club, and user has permissions.
- * @param ctx - Authenticated context with profile
+ * @param ctx - Query context
  * @param membershipIds - Array of membership IDs to validate
  * @returns Object containing validated memberships and club ID
  * @throws ConvexError when memberships are from different clubs or user lacks permissions
  */
 export const validateBulkMemberships = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: QueryCtx,
   membershipIds: Id<"clubMemberships">[],
 ): Promise<{ memberships: ClubMembership[]; clubId: Id<"clubs"> | null }> => {
   if (membershipIds.length === 0) return { memberships: [], clubId: null };

@@ -31,15 +31,6 @@ import { zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
-export const eventFiltersSchema = z.object({
-  fromDate: z.number(),
-  toDate: z.number(),
-  clubIds: z.array(zid("clubs")).optional(),
-  skillLevelMin: z.number().min(0).max(5).optional(),
-  skillLevelMax: z.number().min(0).max(5).optional(),
-  location: z.string().optional(),
-});
-
 const locationSchema = z.object({
   name: z.string(),
   placeId: z.string(),
@@ -71,8 +62,6 @@ const scheduleSchema = z.object({
   endDate: z.number().optional(),
   dayOfWeek: z.number().min(0).max(6).optional(),
   dayOfMonth: z.number().min(1).max(31).optional(),
-  startTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
-  endTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
 });
 
 const discountSchema = z.object({
@@ -112,7 +101,7 @@ const baseTimeslotSchema = z.object({
   permanentParticipants: z.array(zid("users")).max(MAX_PARTICIPANTS),
 });
 
-const timeslotSeriesSchema = baseTimeslotSchema;
+const timeslotInputSchema = baseTimeslotSchema;
 
 const timeslotSchema = baseTimeslotSchema.extend({
   id: z.string(),
@@ -133,13 +122,16 @@ export const baseEventSchema = z.object({
   logo: z.string().optional(),
   banner: z.string().optional(),
   type: z.enum([EVENT_TYPE.SOCIAL, EVENT_TYPE.TRAINING]),
-  schedule: scheduleSchema,
+  startTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
+  endTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
+  timeslots: z.array(timeslotInputSchema).min(1),
   paymentType: z.enum([PAYMENT_TYPE.CASH]),
   visibility: eventVisibilitySchema,
   graceTime: graceTimeSchema.optional(),
   levelRange: levelRangeSchema,
   createdAt: z.number(),
   modifiedAt: z.number().optional(),
+  createdBy: zid("users"),
 });
 
 export const eventRecurrenceSchema = z.enum([
@@ -148,19 +140,18 @@ export const eventRecurrenceSchema = z.enum([
   EVENT_RECURRENCE.MONTHLY,
 ]);
 
-export const eventSeriesSchema = baseEventSchema.extend({
-  recurrence: eventRecurrenceSchema,
-  timeslots: z.array(timeslotSeriesSchema).min(1),
-  isActive: z.boolean(),
-  createdBy: zid("users"),
-});
-
 export const eventStatusSchema = z.enum([
   EVENT_STATUS.NOT_STARTED,
   EVENT_STATUS.IN_PROGRESS,
   EVENT_STATUS.COMPLETED,
   EVENT_STATUS.CANCELLED,
 ]);
+
+export const eventSeriesSchema = baseEventSchema.extend({
+  recurrence: eventRecurrenceSchema,
+  schedule: scheduleSchema,
+  isActive: z.boolean(),
+});
 
 export const eventSchema = baseEventSchema.extend({
   eventSeriesId: zid("eventSeries").optional(),
@@ -184,9 +175,28 @@ export const eventSeriesCreateInputSchema = eventSeriesSchema.omit({
   modifiedAt: true,
 });
 
+export const eventCreateInputSchema = baseEventSchema
+  .omit({
+    createdBy: true,
+    createdAt: true,
+    modifiedAt: true,
+  })
+  .extend({
+    date: z.number(),
+  });
+
 export const eventSeriesUpdateInputSchema = eventSeriesCreateInputSchema
   .omit({ clubId: true })
   .partial();
+
+export const eventFiltersSchema = z.object({
+  fromDate: z.number(),
+  toDate: z.number(),
+  query: z.string().optional(),
+  clubIds: z.array(zid("clubs")).optional(),
+  levelRange: levelRangeSchema.optional(),
+  placeId: z.string().optional(),
+});
 
 export type EventSeries = DocumentByName<DataModel, "eventSeries">;
 export type Event = DocumentByName<DataModel, "events">;
@@ -197,33 +207,27 @@ export type EventVisibility = z.infer<typeof eventVisibilitySchema>;
 export type EventStatus = z.infer<typeof eventStatusSchema>;
 export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateInputSchema>;
 export type EventSeriesUpdateInput = z.infer<typeof eventSeriesUpdateInputSchema>;
-export type TimeslotSeries = z.infer<typeof timeslotSeriesSchema>;
+export type EventCreateInput = z.infer<typeof eventCreateInputSchema>;
+export type TimeslotInput = z.infer<typeof timeslotInputSchema>;
 export type Timeslot = z.infer<typeof timeslotSchema>;
 export type EventFilters = z.infer<typeof eventFiltersSchema>;
-
 export type EventDetails = DocumentByName<DataModel, "events"> & {
   participation: EventParticipant;
 };
 
-export const eventSeriesTable = defineTable(zodToConvex(eventSeriesSchema))
-  .index("clubId", ["clubId"])
-  .index("visibility", ["visibility"])
-  .index("location", ["location.placeId"])
-  .index("levelRange", ["levelRange.min", "levelRange.max"])
-  .index("schedule", ["schedule.startDate"])
-  .index("createdBy", ["createdBy"]);
+export const eventSeriesTable = defineTable(zodToConvex(eventSeriesSchema)).index("clubId", [
+  "clubId",
+]);
 
 export const eventTable = defineTable(zodToConvex(eventSchema))
-  .index("clubIdDate", ["clubId", "date"])
+  .index("clubDate", ["clubId", "date"])
   .index("eventSeriesDate", ["eventSeriesId", "date"])
   .index("date", ["date"]);
 
 export const eventParticipantTable = defineTable(zodToConvex(eventParticipantSchema))
   .index("eventId", ["eventId"])
-  .index("timeslotId", ["timeslotId"])
   .index("userDate", ["userId", "date"])
-  .index("eventUser", ["eventId", "userId"])
-  .index("timeslotWaitlistJoinedAt", ["timeslotId", "isWaitlisted", "joinedAt"]);
+  .index("eventUser", ["eventId", "userId"]);
 
 export const eventTables = {
   eventSeries: eventSeriesTable,

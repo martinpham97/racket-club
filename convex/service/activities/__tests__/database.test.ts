@@ -1,46 +1,44 @@
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
-import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestActivity, createTestActivityRecord } from "@/test-utils/samples/activities";
-import { genId } from "@/test-utils/samples/id";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Id } from "@/convex/_generated/dataModel";
+import { ACTIVITY_TYPES } from "@/convex/constants/activities";
+import schema from "@/convex/schema";
 import {
   createActivity,
   deleteActivitiesForResource,
   getActivity,
   listActivitiesForResource,
   listActivitiesForUser,
-} from "../database";
+} from "@/convex/service/activities/database";
+import { ActivityTestHelpers, createTestActivity } from "@/test-utils/samples/activities";
+import { ClubTestHelpers, createTestClub } from "@/test-utils/samples/clubs";
+import { UserTestHelpers } from "@/test-utils/samples/users";
+import { convexTest } from "convex-test";
+import { describe, expect, it } from "vitest";
 
 describe("Activity Database Service", () => {
-  let mockCtx: AuthenticatedWithProfileCtx;
-
-  beforeEach(() => {
-    mockCtx = createMockCtx();
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
+  const t = convexTest(schema);
+  const activityHelpers = new ActivityTestHelpers(t);
+  const clubHelpers = new ClubTestHelpers(t);
+  const userHelpers = new UserTestHelpers(t);
 
   describe("getActivity", () => {
     it("returns activity when found", async () => {
-      const activityId = genId<"activities">("activities");
-      const activity = createTestActivityRecord();
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const activity = createTestActivity(clubId, userId);
+      const activityId = await activityHelpers.insertActivity(activity);
 
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(activity);
+      const result = await t.run(async (ctx) => {
+        return await getActivity(ctx, activityId);
+      });
 
-      const result = await getActivity(mockCtx, activityId);
-
-      expect(result).toEqual(activity);
-      expect(mockCtx.db.get).toHaveBeenCalledWith(activityId);
+      expect(result).not.toBeNull();
+      expect(result!._id).toBe(activityId);
     });
 
     it("returns null when not found", async () => {
-      const activityId = genId<"activities">("activities");
-
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(null);
-
-      const result = await getActivity(mockCtx, activityId);
+      const result = await t.run(async (ctx) => {
+        return await getActivity(ctx, "invalid-id" as Id<"activities">);
+      });
 
       expect(result).toBeNull();
     });
@@ -48,110 +46,105 @@ describe("Activity Database Service", () => {
 
   describe("listActivitiesForResource", () => {
     it("returns paginated activities for club", async () => {
-      const clubId = genId<"clubs">("clubs");
-      const paginationOpts = { cursor: null, numItems: 10 };
-      const activities = [createTestActivityRecord(), createTestActivityRecord()];
-      const paginatedResult = { page: activities, isDone: true, continueCursor: null };
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
 
-      const mockQuery = {
-        withIndex: vi.fn(() => ({
-          order: vi.fn(() => ({
-            paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
-          })),
-        })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
+      const activity1 = createTestActivity(clubId, userId, { type: ACTIVITY_TYPES.CLUB_CREATED });
+      const activity2 = createTestActivity(clubId, userId, { type: ACTIVITY_TYPES.CLUB_UPDATED });
 
-      const result = await listActivitiesForResource(mockCtx, clubId, paginationOpts);
+      await activityHelpers.insertActivity(activity1);
+      await activityHelpers.insertActivity(activity2);
 
-      expect(result).toEqual(paginatedResult);
-      expect(mockCtx.db.query).toHaveBeenCalledWith("activities");
+      const result = await t.run(async (ctx) => {
+        return await listActivitiesForResource(ctx, clubId, { cursor: null, numItems: 10 });
+      });
+
+      expect(result.page).toHaveLength(2);
+      expect(result.page.every((activity) => activity.resourceId === clubId)).toBe(true);
     });
   });
 
   describe("createActivity", () => {
     it("inserts new activity", async () => {
-      const activity = createTestActivity();
-      const activityId = genId<"activities">("activities");
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const activity = createTestActivity(clubId, userId);
 
-      vi.mocked(mockCtx.db.insert).mockResolvedValueOnce(activityId);
+      const activityId = await t.run(async (ctx) => {
+        return await createActivity(ctx, activity);
+      });
 
-      const result = await createActivity(mockCtx, activity);
-
-      expect(result).toBe(activityId);
-      expect(mockCtx.db.insert).toHaveBeenCalledWith("activities", activity);
+      const savedActivity = await activityHelpers.getActivity(activityId);
+      expect(savedActivity).not.toBeNull();
+      expect(savedActivity!.resourceId).toBe(clubId);
+      expect(savedActivity!.createdBy).toBe(userId);
     });
   });
 
   describe("listActivitiesForUser", () => {
     it("returns paginated activities for user", async () => {
-      const userId = genId<"users">("users");
-      const paginationOpts = { cursor: null, numItems: 10 };
-      const activities = [createTestActivityRecord(), createTestActivityRecord()];
-      const paginatedResult = { page: activities, isDone: true, continueCursor: null };
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
 
-      const mockQuery = {
-        withIndex: vi.fn(() => ({
-          order: vi.fn(() => ({
-            paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
-          })),
-        })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
+      const activity1 = createTestActivity(clubId, userId, { relatedId: userId });
+      const activity2 = createTestActivity(clubId, userId, { relatedId: userId });
 
-      const result = await listActivitiesForUser(mockCtx, userId, paginationOpts);
+      await activityHelpers.insertActivity(activity1);
+      await activityHelpers.insertActivity(activity2);
 
-      expect(result).toEqual(paginatedResult);
-      expect(mockCtx.db.query).toHaveBeenCalledWith("activities");
-      expect(mockQuery.withIndex).toHaveBeenCalledWith("relatedId", expect.any(Function));
+      const result = await t.run(async (ctx) => {
+        return await listActivitiesForUser(ctx, userId, { cursor: null, numItems: 10 });
+      });
+
+      expect(result.page).toHaveLength(2);
+      expect(result.page.every((activity) => activity.relatedId === userId)).toBe(true);
     });
 
     it("orders activities by descending date", async () => {
-      const userId = genId<"users">("users");
-      const paginationOpts = { cursor: null, numItems: 5 };
-      const paginatedResult = { page: [], isDone: true, continueCursor: null };
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
 
-      const mockOrder = vi.fn(() => ({
-        paginate: vi.fn().mockResolvedValueOnce(paginatedResult),
-      }));
-      const mockQuery = {
-        withIndex: vi.fn(() => ({ order: mockOrder })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
+      const activity1 = createTestActivity(clubId, userId, {
+        relatedId: userId,
+        createdAt: 1000,
+      });
+      const activity2 = createTestActivity(clubId, userId, {
+        relatedId: userId,
+        createdAt: 2000,
+      });
 
-      await listActivitiesForUser(mockCtx, userId, paginationOpts);
+      await activityHelpers.insertActivity(activity1);
+      await activityHelpers.insertActivity(activity2);
 
-      expect(mockOrder).toHaveBeenCalledWith("desc");
+      const result = await t.run(async (ctx) => {
+        return await listActivitiesForUser(ctx, userId, { cursor: null, numItems: 10 });
+      });
+
+      expect(result.page).toHaveLength(2);
+      expect(result.page[0].createdAt).toBeGreaterThan(result.page[1].createdAt);
     });
   });
 
   describe("deleteActivitiesForResource", () => {
     it("removes all activities for resource", async () => {
-      const resourceId = genId<"clubs">("clubs");
-      const activities = [createTestActivityRecord(), createTestActivityRecord()];
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
 
-      const mockQuery = {
-        withIndex: vi.fn(() => ({
-          order: vi.fn(() => ({
-            collect: vi.fn().mockResolvedValueOnce(activities),
-          })),
-        })),
-      };
-      vi.mocked(mockCtx.db.query).mockReturnValueOnce(
-        mockQuery as unknown as ReturnType<typeof mockCtx.db.query>,
-      );
-      vi.mocked(mockCtx.db.delete).mockResolvedValue(undefined);
+      const activity1 = createTestActivity(clubId, userId);
+      const activity2 = createTestActivity(clubId, userId);
 
-      await deleteActivitiesForResource(mockCtx, resourceId);
+      await activityHelpers.insertActivity(activity1);
+      await activityHelpers.insertActivity(activity2);
 
-      expect(mockCtx.db.query).toHaveBeenCalledWith("activities");
-      expect(mockCtx.db.delete).toHaveBeenCalledTimes(2);
+      await t.run(async (ctx) => {
+        await deleteActivitiesForResource(ctx, clubId);
+      });
+
+      const remainingActivities = await t.run(async (ctx) => {
+        return await listActivitiesForResource(ctx, clubId, { cursor: null, numItems: 10 });
+      });
+
+      expect(remainingActivities.page).toHaveLength(0);
     });
   });
 });

@@ -20,12 +20,12 @@ import { Club } from "@/convex/service/clubs/schemas";
 import {
   authenticatedMutationWithRLS,
   authenticatedQueryWithRLS,
-  AuthenticatedWithProfileCtx,
 } from "@/convex/service/utils/functions";
 import { paginatedResult } from "@/convex/service/utils/pagination";
 import { getStartOfDayInTimezone, getUtcTimestampForDate } from "@/convex/service/utils/time";
 import { enforceClubOwnershipOrAdmin } from "@/convex/service/utils/validators/clubs";
 import {
+  validateEventForCreate,
   validateEventSeriesForCreate,
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
@@ -46,11 +46,12 @@ import {
   listEventSeriesForClub as dtoListEventSeriesForClub,
   listEventsForClub as dtoListEventsForClub,
   listParticipatingEvents as dtoListParticipatingEvents,
+  searchEvents as dtoSearchEvents,
   updateEventSeries as dtoUpdateEventSeries,
 } from "./database";
 import {
   Event,
-  EventFilters,
+  eventCreateInputSchema,
   eventFiltersSchema,
   EventParticipant,
   eventParticipantSchema,
@@ -146,6 +147,7 @@ export const listClubEvents = authenticatedQueryWithRLS()({
   returns: paginatedResult(z.object(withSystemFields("events", eventSchema.shape))),
   handler: async (ctx, args) => {
     const { clubId, filters, pagination } = args;
+    // TODO: validate date range is within 1 month
     await getOrThrow(ctx, clubId);
     const userMembership = await getClubMembershipForUser(ctx, clubId, ctx.currentUser._id);
     if (!userMembership) {
@@ -172,6 +174,7 @@ export const listMyEvents = authenticatedQueryWithRLS()({
   returns: paginatedResult(z.object(withSystemFields("events", eventSchema.shape))),
   handler: async (ctx, args) => {
     const { filters, pagination } = args;
+    // TODO: validate date range is within 1 month
     return await dtoListParticipatingEvents(ctx, ctx.currentUser._id, filters, pagination);
   },
 });
@@ -193,18 +196,9 @@ export const searchEvents = authenticatedQueryWithRLS()({
   handler: async (ctx, args) => {
     const { query, filters, pagination } = args;
 
-    const events = await ctx.db
-      .query("events")
-      .withIndex("date", (q) => q.gte("date", filters.fromDate).lte("date", filters.toDate))
-      .order("asc")
-      .paginate(pagination);
-
-    const memberClubIds = await getUserMemberClubIds(ctx, ctx.currentUser._id);
-    events.page = events.page.filter((event) =>
-      applyEventFilters(event, filters, query, memberClubIds),
-    );
-
-    return events;
+    // TODO: validate date range is within 1 month
+    const userMemberClubIds = await getUserMemberClubIds(ctx, ctx.currentUser._id);
+    return await dtoSearchEvents(ctx, query, filters, userMemberClubIds, pagination);
   },
 });
 
@@ -226,7 +220,7 @@ export const createEventSeries = authenticatedMutationWithRLS()({
     enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventSeriesForCreate(ctx, args.input, club);
 
-    const eventSeriesId = await dtoCreateEventSeries(ctx, args.input);
+    const eventSeriesId = await dtoCreateEventSeries(ctx, args.input, ctx.currentUser._id);
 
     await scheduleEventSeriesDeactivation(ctx, eventSeriesId, args.input);
     await ctx.runMutation(internal.service.events.functions._createEvents, {
@@ -251,11 +245,48 @@ export const updateEventSeries = authenticatedMutationWithRLS()({
     const eventSeries = await getOrThrow(ctx, args.eventSeriesId);
     const club = await getOrThrow(ctx, eventSeries.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
-    await validateEventSeriesForUpdate(ctx, args.input, club, eventSeries);
+    await validateEventSeriesForUpdate(ctx, club, eventSeries, args.input);
 
     await dtoUpdateEventSeries(ctx, args.eventSeriesId, args.input);
 
     return null;
+  },
+});
+
+/**
+ * Deletes an existing event series
+ * @param eventSeriesId - ID of the event series to delete
+ * @throws {ConvexError} When series not found or access denied
+ */
+export const deleteEventSeries = authenticatedMutationWithRLS()({
+  args: { eventSeriesId: zid("eventSeries") },
+  returns: z.null(),
+  handler: async (ctx, args) => {
+    const eventSeries = await getOrThrow(ctx, args.eventSeriesId);
+    const club = await getOrThrow(ctx, eventSeries.clubId);
+    enforceClubOwnershipOrAdmin(ctx, club);
+
+    await ctx.db.delete(args.eventSeriesId);
+
+    return null;
+  },
+});
+
+/**
+ * Creates a new event
+ * @param input - Event configuration data
+ * @returns ID of the created event
+ * @throws {ConvexError} When validation fails or access denied
+ */
+export const createEvent = authenticatedMutationWithRLS()({
+  args: { input: eventCreateInputSchema },
+  returns: zid("events"),
+  handler: async (ctx, args) => {
+    const club = await getOrThrow(ctx, args.input.clubId);
+    enforceClubOwnershipOrAdmin(ctx, club);
+    await validateEventForCreate(ctx, args.input, club);
+    const eventId = await dtoCreateEvent(ctx, ctx.currentUser._id, args.input);
+    return eventId;
   },
 });
 
@@ -315,7 +346,7 @@ export const joinEvent = authenticatedMutationWithRLS()({
 
     await validateJoinability(ctx, club, event, ctx.currentUser._id);
     const timeslot = getTimeslotOrThrow(event, args.timeslotId);
-    const isWaitlisted = await shouldUserBeWaitlisted(timeslot);
+    const isWaitlisted = shouldUserBeWaitlisted(timeslot);
 
     return await ctx.db.insert("eventParticipants", {
       userId: ctx.currentUser._id,
@@ -384,7 +415,7 @@ export const _createEvents = internalMutation({
 
     const eventIds = await Promise.all(
       dates.map(async (date) => {
-        const eventId = await createEventFromSeries(ctx, series, eventSeriesId, date);
+        const eventId = await createEventFromSeries(ctx, series, date);
         if (eventId) {
           const event = await getOrThrow(ctx, eventId);
           await insertPermanentParticipants(ctx, event);
@@ -436,15 +467,15 @@ export const _deactivateEventSeries = internalMutation({
 const createEventFromSeries = async (
   ctx: MutationCtx,
   series: EventSeries,
-  seriesId: Id<"eventSeries">,
   date: number,
 ): Promise<Id<"events">> => {
-  const existing = await dtoGetEventAtDate(ctx, seriesId, date);
+  const existing = await dtoGetEventAtDate(ctx, series._id, date);
   if (existing) {
     console.warn(`Event for ${new Date(date).toDateString()} already exists.`);
     return existing._id;
   }
-  return await dtoCreateEvent(ctx, series, seriesId, date);
+  const eventInput = { ...eventCreateInputSchema.parse(series), date };
+  return await dtoCreateEvent(ctx, series.createdBy, eventInput, series._id);
 };
 
 /**
@@ -456,12 +487,8 @@ const scheduleStatusTransitions = async (
   eventId: Id<"events">,
   date: number,
 ): Promise<void> => {
-  const startTime = getUtcTimestampForDate(
-    series.schedule.startTime,
-    series.location.timezone,
-    date,
-  );
-  const endTime = getUtcTimestampForDate(series.schedule.endTime, series.location.timezone, date);
+  const startTime = getUtcTimestampForDate(series.startTime, series.location.timezone, date);
+  const endTime = getUtcTimestampForDate(series.endTime, series.location.timezone, date);
 
   await Promise.all([
     ctx.scheduler.runAt(startTime, internal.service.events.functions._updateEventStatus, {
@@ -483,10 +510,6 @@ const generateUpcomingEventDates = (
   startDate: number,
   endDate?: number,
 ): number[] => {
-  // if (series.recurrence === SESSION_RECURRENCE.ONE_TIME && series.schedule.date) {
-  //   return [getStartOfDayInTimezone(series.schedule.date, series.location.timezone).getTime()];
-  // }
-
   if (!startDate || !series.schedule.endDate) {
     throw new ConvexError(EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR);
   }
@@ -567,46 +590,6 @@ const getUserMemberClubIds = async (ctx: QueryCtx, userId: Id<"users">): Promise
 };
 
 /**
- * Applies search filters to a event
- */
-const applyEventFilters = (
-  event: Event,
-  filters: EventFilters,
-  query?: string,
-  memberClubIds?: Id<"clubs">[],
-): boolean => {
-  if (
-    event.visibility === EVENT_VISIBILITY.MEMBERS_ONLY &&
-    memberClubIds &&
-    !memberClubIds.includes(event.clubId)
-  ) {
-    return false;
-  }
-
-  if (filters.clubIds && !filters.clubIds.includes(event.clubId)) return false;
-  if (filters.skillLevelMin !== undefined && event.levelRange.max < filters.skillLevelMin)
-    return false;
-  if (filters.skillLevelMax !== undefined && event.levelRange.min > filters.skillLevelMax)
-    return false;
-  if (
-    filters.location &&
-    !event.location.name.toLowerCase().includes(filters.location.toLowerCase())
-  ) {
-    return false;
-  }
-
-  if (query) {
-    const searchText = query.toLowerCase();
-    return (
-      event.name.toLowerCase().includes(searchText) ||
-      (event.description?.toLowerCase().includes(searchText) ?? false)
-    );
-  }
-
-  return true;
-};
-
-/**
  * Schedules series deactivation at end date
  */
 const scheduleEventSeriesDeactivation = async (
@@ -630,7 +613,7 @@ const scheduleEventSeriesDeactivation = async (
  * Validates join permissions (ban status, visibility, event status)
  */
 const validateJoinability = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   club: Club,
   event: Event,
   userId: Id<"users">,
@@ -658,7 +641,7 @@ const getTimeslotOrThrow = (event: Event, timeslotId: string): Timeslot => {
 /**
  * Determines if user should be waitlisted
  */
-const shouldUserBeWaitlisted = async (timeslot: Timeslot): Promise<boolean> => {
+const shouldUserBeWaitlisted = (timeslot: Timeslot): boolean => {
   if (timeslot.numParticipants >= timeslot.maxParticipants) {
     if (timeslot.numWaitlisted >= timeslot.maxWaitlist) {
       throw new ConvexError(EVENT_TIMESLOT_FULL_ERROR);

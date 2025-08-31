@@ -1,4 +1,5 @@
 import { Id } from "@/convex/_generated/dataModel";
+import { MutationCtx } from "@/convex/_generated/server";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
@@ -44,7 +45,7 @@ import {
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
   getClubBanRecordForUser as dtoGetClubBanRecordForUser,
   getClubMembershipForUser as dtoGetClubMembershipForUser,
-  listMyClubs as dtoListMyClubs,
+  listClubsForUser as dtoListClubsForUser,
   listPublicClubs as dtoListPublicClubs,
   updateClub as dtoUpdateClub,
 } from "./database";
@@ -80,13 +81,19 @@ export const listPublicClubs = publicQueryWithRLS()({
 });
 
 /**
- * Lists all clubs that the authenticated user is a member of with pagination.
+ * Lists all clubs that a user is a member of with pagination.
+ * @param userId - ID of the user to get clubs for
  * @param pagination - Pagination options (cursor, numItems)
  * @returns Paginated result of user's clubs with membership details
  */
-export const listMyClubs = authenticatedQueryWithRLS()({
-  args: { pagination: convexToZod(paginationOptsValidator) },
-  handler: async (ctx, args) => await dtoListMyClubs(ctx, args.pagination),
+export const listClubsForUser = authenticatedQueryWithRLS()({
+  args: {
+    userId: zid("users"),
+    pagination: convexToZod(paginationOptsValidator),
+  },
+  handler: async (ctx, args) => {
+    return await dtoListClubsForUser(ctx, args.userId, args.pagination);
+  },
 });
 
 /**
@@ -221,7 +228,7 @@ export const createClub = authenticatedMutationWithRLS()({
     await enforceRateLimit(ctx, "createClub", ctx.currentUser._id);
     await validateClubName(ctx, args.input.name, args.input.isPublic);
 
-    const clubId = await dtoCreateClub(ctx, args.input);
+    const clubId = await dtoCreateClub(ctx, args.input, ctx.currentUser._id);
 
     await createClubActivity(ctx, clubId, ctx.currentUser._id, ACTIVITY_TYPES.CLUB_CREATED, [
       { newValue: args.input.name },
@@ -546,15 +553,11 @@ const createClubActivity = async (
 
 /**
  * Updates the member count for a club by a given delta.
- * @param ctx - Authenticated context with profile
+ * @param ctx - Mutation context
  * @param clubId - ID of the club to update
  * @param delta - Change in member count (positive or negative)
  */
-const updateMemberCount = async (
-  ctx: AuthenticatedWithProfileCtx,
-  clubId: Id<"clubs">,
-  delta: number,
-) => {
+const updateMemberCount = async (ctx: MutationCtx, clubId: Id<"clubs">, delta: number) => {
   const club = await getOrThrow(ctx, clubId);
   const newCount = Math.max(0, club.numMembers + delta);
   if (newCount !== club.numMembers) {

@@ -1,5 +1,5 @@
-import { MutationCtx } from "@/convex/_generated/server";
 import { AUTH_PROVIDER_NO_EMAIL_ERROR } from "@/convex/constants/errors";
+import schema from "@/convex/schema";
 import {
   createUserProfile,
   findUserByEmail,
@@ -8,83 +8,73 @@ import {
   getProfileByUserId,
   updateUserProfile,
 } from "@/convex/service/users/database";
-import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { genId } from "@/test-utils/samples/id";
-import { createTestUserRecord } from "@/test-utils/samples/users";
-import { ConvexError } from "convex/values";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@convex-dev/auth/server", () => ({
-  getAuthUserId: vi.fn(),
-}));
-
-vi.mock("convex-helpers/server/relationships", () => ({
-  getOneFrom: vi.fn(),
-}));
-
-const { getAuthUserId } = vi.mocked(await import("@convex-dev/auth/server"));
-const { getOneFrom } = vi.mocked(await import("convex-helpers/server/relationships"));
+import { createTestProfile, generateTestEmail, UserTestHelpers } from "@/test-utils/samples/users";
+import { convexTest } from "convex-test";
+import { describe, expect, it } from "vitest";
 
 describe("User Database Service", () => {
-  let mockCtx: MutationCtx;
-
-  beforeEach(() => {
-    mockCtx = createMockCtx();
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
+  const t = convexTest(schema);
+  const userHelpers = new UserTestHelpers(t);
 
   describe("findUserByEmail", () => {
     it("returns user when found", async () => {
-      const { profile: _profile, ...user } = createTestUserRecord({ email: "test@example.com" });
-      getOneFrom.mockResolvedValueOnce(user);
+      const email = generateTestEmail();
+      const userId = await userHelpers.insertUser(email);
 
-      const result = await findUserByEmail(mockCtx, "test@example.com");
+      const result = await t.run(async (ctx) => {
+        return await findUserByEmail(ctx, email);
+      });
 
-      expect(result).toEqual(user);
-      expect(getOneFrom).toHaveBeenCalledWith(mockCtx.db, "users", "email", "test@example.com");
+      expect(result).not.toBeNull();
+      expect(result!._id).toBe(userId);
+      expect(result!.email).toBe(email);
     });
 
     it("returns null when user not found", async () => {
-      getOneFrom.mockResolvedValueOnce(null);
-
-      const result = await findUserByEmail(mockCtx, "nonexistent@example.com");
+      const result = await t.run(async (ctx) => {
+        return await findUserByEmail(ctx, "nonexistent@example.com");
+      });
 
       expect(result).toBeNull();
     });
   });
 
   describe("getCurrentUser", () => {
-    it("returns current user with profile", async () => {
-      const userId = genId<"users">("users");
-      const user = createTestUserRecord({ _id: userId });
-      const profile = user.profile;
+    it("returns user with profile when authenticated", async () => {
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
 
-      getAuthUserId.mockResolvedValueOnce(userId);
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(user);
-      getOneFrom.mockResolvedValueOnce(profile);
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.run(async (ctx) => {
+        return await getCurrentUser(ctx);
+      });
 
-      const result = await getCurrentUser(mockCtx);
-
-      expect(result).toEqual({ ...user, profile });
+      expect(result).not.toBeNull();
+      expect(result!._id).toBe(userId);
+      expect(result!.profile).not.toBeNull();
     });
 
     it("returns null when not authenticated", async () => {
-      getAuthUserId.mockResolvedValueOnce(null);
-
-      const result = await getCurrentUser(mockCtx);
+      const result = await t.run(async (ctx) => {
+        return await getCurrentUser(ctx);
+      });
 
       expect(result).toBeNull();
     });
 
-    it("returns null when user not found", async () => {
-      const userId = genId<"users">("users");
-      getAuthUserId.mockResolvedValueOnce(userId);
-      vi.mocked(mockCtx.db.get).mockResolvedValueOnce(null);
+    it("returns null when authenticated user is deleted", async () => {
+      const userId = await userHelpers.insertUser();
 
-      const result = await getCurrentUser(mockCtx);
+      // Delete the user
+      await t.run(async (ctx) => {
+        await ctx.db.delete(userId);
+      });
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.run(async (ctx) => {
+        return await getCurrentUser(ctx);
+      });
 
       expect(result).toBeNull();
     });
@@ -92,20 +82,25 @@ describe("User Database Service", () => {
 
   describe("getProfileByUserId", () => {
     it("returns profile when found", async () => {
-      const userId = genId<"users">("users");
-      const profile = createTestUserRecord().profile;
-      getOneFrom.mockResolvedValueOnce(profile);
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId);
+      const profileId = await userHelpers.insertProfile(profile);
 
-      const result = await getProfileByUserId(mockCtx, userId);
+      const result = await t.run(async (ctx) => {
+        return await getProfileByUserId(ctx, userId);
+      });
 
-      expect(result).toEqual(profile);
+      expect(result).not.toBeNull();
+      expect(result!._id).toBe(profileId);
+      expect(result!.userId).toBe(userId);
     });
 
     it("returns null when profile not found", async () => {
-      const userId = genId<"users">("users");
-      getOneFrom.mockResolvedValueOnce(null);
+      const userId = await userHelpers.insertUser();
 
-      const result = await getProfileByUserId(mockCtx, userId);
+      const result = await t.run(async (ctx) => {
+        return await getProfileByUserId(ctx, userId);
+      });
 
       expect(result).toBeNull();
     });
@@ -113,39 +108,46 @@ describe("User Database Service", () => {
 
   describe("createUserProfile", () => {
     it("creates new profile when none exists", async () => {
-      const userId = genId<"users">("users");
-      const profileId = genId<"userProfiles">("userProfiles");
-      const input = { userId, firstName: "John", lastName: "Doe" };
+      const userId = await userHelpers.insertUser();
+      const input = createTestProfile(userId, { firstName: "John", lastName: "Doe" });
 
-      getOneFrom.mockResolvedValueOnce(null);
-      vi.mocked(mockCtx.db.insert).mockResolvedValueOnce(profileId);
+      const profileId = await t.run(async (ctx) => {
+        return await createUserProfile(ctx, input);
+      });
 
-      const result = await createUserProfile(mockCtx, input);
-
-      expect(result).toBe(profileId);
+      const profile = await userHelpers.getProfile(profileId);
+      expect(profile).not.toBeNull();
+      expect(profile!.firstName).toBe("John");
+      expect(profile!.lastName).toBe("Doe");
+      expect(profile!.userId).toBe(userId);
     });
   });
 
   describe("updateUserProfile", () => {
     it("updates existing profile", async () => {
-      const userId = genId<"users">("users");
-      const profileId = genId<"userProfiles">("userProfiles");
-      const input = { userId, firstName: "Updated", lastName: "Name" };
+      const userId = await userHelpers.insertUser();
+      const profile = createTestProfile(userId, { firstName: "Original", lastName: "Name" });
+      const profileId = await userHelpers.insertProfile(profile);
+      const updateData = { userId, firstName: "Updated", lastName: "Name" };
 
-      vi.mocked(mockCtx.db.patch).mockResolvedValueOnce(undefined);
+      await t.run(async (ctx) => {
+        await updateUserProfile(ctx, profileId, updateData);
+      });
 
-      await updateUserProfile(mockCtx, profileId, input);
-
-      expect(mockCtx.db.patch).toHaveBeenCalledWith(profileId, input);
+      const updatedProfile = await userHelpers.getProfile(profileId);
+      expect(updatedProfile!.firstName).toBe("Updated");
+      expect(updatedProfile!.lastName).toBe("Name");
     });
   });
 
   describe("getOrCreateUser", () => {
     it("returns existing user ID when provided", async () => {
-      const existingUserId = genId<"users">("users");
+      const existingUserId = await userHelpers.insertUser();
       const args = { existingUserId };
 
-      const result = await getOrCreateUser(mockCtx, args);
+      const result = await t.run(async (ctx) => {
+        return await getOrCreateUser(ctx, args);
+      });
 
       expect(result).toBe(existingUserId);
     });
@@ -153,38 +155,39 @@ describe("User Database Service", () => {
     it("throws error when no email provided", async () => {
       const args = {};
 
-      await expect(getOrCreateUser(mockCtx, args)).rejects.toThrow(
-        new ConvexError(AUTH_PROVIDER_NO_EMAIL_ERROR),
-      );
+      await expect(
+        t.run(async (ctx) => {
+          return await getOrCreateUser(ctx, args);
+        }),
+      ).rejects.toThrow(AUTH_PROVIDER_NO_EMAIL_ERROR);
     });
 
     it("returns existing user ID when user found by email", async () => {
-      const { profile: _profile, ...user } = createTestUserRecord({ email: "test@example.com" });
-      const args = { email: "test@example.com" };
+      const email = generateTestEmail("existing");
+      const existingUserId = await userHelpers.insertUser(email);
+      const args = { email };
 
-      // Mock findUserByEmail call inside getOrCreateUser
-      getOneFrom.mockResolvedValueOnce(user);
+      const result = await t.run(async (ctx) => {
+        return await getOrCreateUser(ctx, args);
+      });
 
-      const result = await getOrCreateUser(mockCtx, args);
-
-      expect(result).toBe(user._id);
-      expect(getOneFrom).toHaveBeenCalledWith(mockCtx.db, "users", "email", "test@example.com");
+      expect(result).toBe(existingUserId);
     });
 
     it("creates new user when not found", async () => {
-      const newUserId = genId<"users">("users");
-      const args = { email: "new@example.com" };
+      const email = generateTestEmail("new");
+      const args = { email };
 
-      // Mock findUserByEmail to return null (user not found)
-      getOneFrom.mockResolvedValueOnce(null);
-      vi.mocked(mockCtx.db.insert).mockResolvedValueOnce(newUserId);
-
-      const result = await getOrCreateUser(mockCtx, args);
-
-      expect(result).toBe(newUserId);
-      expect(mockCtx.db.insert).toHaveBeenCalledWith("users", {
-        email: "new@example.com",
+      const result = await t.run(async (ctx) => {
+        return await getOrCreateUser(ctx, args);
       });
+
+      const user = await t.run(async (ctx) => {
+        return await ctx.db.get(result);
+      });
+
+      expect(user).not.toBeNull();
+      expect(user!.email).toBe(email);
     });
   });
 });

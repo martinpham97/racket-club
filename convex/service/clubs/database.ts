@@ -1,10 +1,7 @@
-"use server";
-
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { PaginationOptions, PaginationResult } from "convex/server";
-import { Club, ClubCreateInput, ClubMembership, MyClub } from "./schemas";
+import { Club, ClubCreateInput, ClubDetails, ClubMembership } from "./schemas";
 
 /**
  * Gets a club by its ID.
@@ -51,56 +48,60 @@ export const listPublicClubs = async (
 };
 
 /**
- * Lists all clubs that the authenticated user is a member of with pagination.
- * @param ctx Authenticated context with profile
+ * Lists all clubs that the user is a member of with pagination.
+ * @param ctx Mutation context
+ * @param userId User ID to list clubs for
  * @param paginationOpts Pagination options (cursor, numItems)
  * @returns Paginated result of user's clubs with membership details
  */
-export const listMyClubs = async (
-  ctx: AuthenticatedWithProfileCtx,
+export const listClubsForUser = async (
+  ctx: QueryCtx,
+  userId: Id<"users">,
   paginationOpts: PaginationOptions,
-): Promise<PaginationResult<MyClub>> => {
+): Promise<PaginationResult<ClubDetails>> => {
   const memberships = await ctx.db
     .query("clubMemberships")
-    .withIndex("userId", (q) => q.eq("userId", ctx.currentUser._id))
+    .withIndex("userId", (q) => q.eq("userId", userId))
     .paginate(paginationOpts);
-  const myClubs = (
+  const userClubs = (
     await Promise.all(
       memberships.page.map(async (membership) => {
-        const club = await ctx.db.get(membership.clubId); // or whatever property contains the club ID
-        return club ? ({ ...club, membership } as MyClub) : null;
+        const club = await ctx.db.get(membership.clubId);
+        return club ? ({ ...club, membership } as ClubDetails) : null;
       }),
     )
-  ).filter(Boolean) as MyClub[];
-  return { ...memberships, page: myClubs };
+  ).filter(Boolean) as ClubDetails[];
+  return { ...memberships, page: userClubs };
 };
 
 /**
  * Creates a new club with the authenticated user as the creator.
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param input Club creation data
+ * @param createdBy User ID of club creator
  * @returns ID of the created club
  */
 export const createClub = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   input: Omit<ClubCreateInput, "membershipInfo">,
+  createdBy: Id<"users">,
 ): Promise<Id<"clubs">> => {
   return await ctx.db.insert("clubs", {
     ...input,
     isApproved: false,
-    createdBy: ctx.currentUser._id,
+    createdBy,
     numMembers: 0,
   });
 };
 
 /**
  * Updates an existing club with new data.
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param clubId Club ID to update
  * @param input Club update data
  */
 export const updateClub = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   clubId: Id<"clubs">,
   input: Partial<Club>,
 ): Promise<void> => {
@@ -109,11 +110,11 @@ export const updateClub = async (
 
 /**
  * Deletes all memberships for the given club
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param clubId Club ID
  */
 export const deleteAllClubMemberships = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   clubId: Id<"clubs">,
 ): Promise<void> => {
   // Get and delete all memberships within the current club
@@ -143,13 +144,13 @@ export const listAllClubMembers = async (
 
 /**
  * Gets a user's ban record for the given club if exists
- * @param ctx Authenticated context with profile
+ * @param ctx Mutation context
  * @param clubId Club ID
  * @param userId User ID
  * @returns Ban record if exists, else null
  */
 export const getClubBanRecordForUser = async (
-  ctx: AuthenticatedWithProfileCtx,
+  ctx: MutationCtx,
   clubId: Id<"clubs">,
   userId: Id<"users">,
 ) => {

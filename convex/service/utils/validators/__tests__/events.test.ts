@@ -2,10 +2,12 @@ import { QueryCtx } from "@/convex/_generated/server";
 import {
   END_TIME_AFTER_START_ERROR,
   EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR,
+  EVENT_DATE_FUTURE_ERROR,
   EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
   EVENT_DAY_OF_MONTH_REQUIRED_ERROR,
   EVENT_DAY_OF_WEEK_REQUIRED_ERROR,
   EVENT_END_DATE_AFTER_START_ERROR,
+  EVENT_INVALID_RECURRENCE_ERROR,
   EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
   EVENT_START_DATE_FUTURE_ERROR,
   EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
@@ -30,14 +32,18 @@ import {
   MAX_PARTICIPANTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
+import { EventCreateInput, EventRecurrence } from "@/convex/service/events/schemas";
 import {
+  validateEventDate,
+  validateEventForCreate,
   validateEventSchedule,
-  validateEventScheduleForUpdate,
   validateEventSeriesForCreate,
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
+  validateEventTime,
   validateEventTimeslots,
   validateEventVisibility,
+  validateRecurringSchedule,
 } from "@/convex/service/utils/validators/events";
 import { createMockCtx } from "@/test-utils/mocks/ctx";
 import { createTestClubMembershipRecord, createTestClubRecord } from "@/test-utils/samples/clubs";
@@ -45,11 +51,127 @@ import {
   createTestEventRecord,
   createTestEventSeriesInput,
   createTestEventSeriesRecord,
-  createTestTimeslotSeries,
+  createTestTimeslot,
+  createTestTimeslotInput,
 } from "@/test-utils/samples/events";
 import { genId } from "@/test-utils/samples/id";
 import { createTestUserRecord } from "@/test-utils/samples/users";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Date calculation constants
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+const THIRTY_DAYS_MS = 30 * ONE_DAY_MS;
+const SIXTY_DAYS_MS = 60 * ONE_DAY_MS;
+
+describe("validateEventTime", () => {
+  it("should pass when start time is before end time", () => {
+    expect(() => validateEventTime("18:00", "20:00")).not.toThrow();
+  });
+
+  it("should throw when start time equals end time", () => {
+    expect(() => validateEventTime("18:00", "18:00")).toThrow(END_TIME_AFTER_START_ERROR);
+  });
+
+  it("should throw when start time is after end time", () => {
+    expect(() => validateEventTime("20:00", "18:00")).toThrow(END_TIME_AFTER_START_ERROR);
+  });
+});
+
+describe("validateEventDate", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should pass when date is in the future", () => {
+    const futureDate = Date.now() + ONE_DAY_MS;
+    expect(() => validateEventDate(futureDate)).not.toThrow();
+  });
+
+  it("should throw when date is in the past", () => {
+    const pastDate = Date.now() - ONE_DAY_MS;
+    expect(() => validateEventDate(pastDate)).toThrow(EVENT_DATE_FUTURE_ERROR);
+  });
+
+  it("should throw when date is too far in the future", () => {
+    const farFutureDate = Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * ONE_DAY_MS;
+    expect(() => validateEventDate(farFutureDate)).toThrow(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
+  });
+});
+
+describe("validateRecurringSchedule", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should throw when startDate is undefined", () => {
+    const schedule = {
+      startDate: undefined,
+      endDate: Date.now() + THIRTY_DAYS_MS,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow(
+      EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
+    );
+  });
+
+  it("should throw when endDate is undefined", () => {
+    const schedule = {
+      startDate: Date.now() + ONE_DAY_MS,
+      endDate: undefined,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow(
+      EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
+    );
+  });
+
+  it("should throw when startDate is in the past", () => {
+    const schedule = {
+      startDate: Date.now() - ONE_DAY_MS,
+      endDate: Date.now() + THIRTY_DAYS_MS,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_START_DATE_FUTURE_ERROR);
+  });
+
+  it("should throw when endDate is before startDate", () => {
+    const schedule = {
+      startDate: Date.now() + THIRTY_DAYS_MS,
+      endDate: Date.now() + SEVEN_DAYS_MS,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_END_DATE_AFTER_START_ERROR);
+  });
+
+  it("should throw when startDate is too far in the future", () => {
+    const schedule = {
+      startDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * ONE_DAY_MS,
+      endDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 30) * ONE_DAY_MS,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
+  });
+
+  it("should pass when dates are valid", () => {
+    const schedule = {
+      startDate: Date.now() + ONE_DAY_MS,
+      endDate: Date.now() + THIRTY_DAYS_MS,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).not.toThrow();
+  });
+});
 
 describe("validateEventVisibility", () => {
   it("should allow public events for public clubs", () => {
@@ -89,52 +211,13 @@ describe("validateEventSchedule", () => {
     vi.useRealTimers();
   });
 
-  describe("time validation", () => {
-    it("should throw when start time is after end time", () => {
-      const schedule = {
-        startTime: "20:00",
-        endTime: "18:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        END_TIME_AFTER_START_ERROR,
-      );
-    });
-
-    it("should throw when start time equals end time", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "18:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        END_TIME_AFTER_START_ERROR,
-      );
-    });
-
-    it("should pass when start time is before end time", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).not.toThrow();
-    });
-  });
-
   describe("DAILY events", () => {
     it("should throw when start date is undefined", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
         startDate: undefined,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        endDate: Date.now() + THIRTY_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
@@ -146,7 +229,7 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
         endDate: undefined,
       };
 
@@ -159,8 +242,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() - 24 * 60 * 60 * 1000, // Yesterday
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() - ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
@@ -172,8 +255,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 7 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + THIRTY_DAYS_MS,
+        endDate: Date.now() + SEVEN_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
@@ -185,8 +268,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * 24 * 60 * 60 * 1000,
-        endDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 30) * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * ONE_DAY_MS,
+        endDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 30) * ONE_DAY_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
@@ -198,8 +281,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).not.toThrow();
@@ -209,8 +292,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfWeek: 1,
       };
 
@@ -221,8 +304,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfMonth: 15,
       };
 
@@ -235,8 +318,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.WEEKLY)).toThrow(
@@ -248,8 +331,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfWeek: 1,
       };
 
@@ -260,8 +343,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfWeek: 1,
         dayOfMonth: 15,
       };
@@ -275,8 +358,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
       };
 
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.MONTHLY)).toThrow(
@@ -288,8 +371,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfMonth: 15,
       };
 
@@ -300,8 +383,8 @@ describe("validateEventSchedule", () => {
       const schedule = {
         startTime: "18:00",
         endTime: "20:00",
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
         dayOfMonth: 15,
         dayOfWeek: 1,
       };
@@ -309,15 +392,26 @@ describe("validateEventSchedule", () => {
       expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.MONTHLY)).toThrow();
     });
   });
+
+  describe("invalid recurrence", () => {
+    it("should throw for invalid recurrence type", () => {
+      const schedule = {
+        startTime: "18:00",
+        endTime: "20:00",
+        startDate: Date.now() + ONE_DAY_MS,
+        endDate: Date.now() + THIRTY_DAYS_MS,
+      };
+
+      expect(() => validateEventSchedule(schedule, "INVALID" as EventRecurrence)).toThrow(
+        EVENT_INVALID_RECURRENCE_ERROR,
+      );
+    });
+  });
 });
 
 describe("validateEventTimeslots", () => {
-  const baseSchedule = {
-    startTime: "18:00",
-    endTime: "20:00",
-    startDate: Date.now() + 24 * 60 * 60 * 1000,
-    endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  };
+  const startTime = "18:00";
+  const endTime = "20:00";
   const clubId = genId<"clubs">("clubs");
   const user1Id = genId<"users">("users");
   const user2Id = genId<"users">("users");
@@ -330,94 +424,98 @@ describe("validateEventTimeslots", () => {
 
   describe("DURATION timeslots", () => {
     it("should throw when duration is missing", () => {
-      const timeslots = [createTestTimeslotSeries({ duration: undefined })];
+      const timeslots = [createTestTimeslotInput({ duration: undefined })];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_DURATION_REQUIRED_ERROR,
       );
     });
 
     it("should throw when duration exceeds event duration", () => {
-      const timeslots = [createTestTimeslotSeries({ duration: 180 })];
+      const timeslots = [createTestTimeslotInput({ duration: 180 })];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_DURATION_NOT_MATCH_SCHEDULE_ERROR,
       );
     });
 
     it("should pass when duration is valid", () => {
-      const timeslots = [createTestTimeslotSeries()];
+      const timeslots = [createTestTimeslotInput()];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).not.toThrow();
+      expect(() =>
+        validateEventTimeslots(startTime, endTime, timeslots, clubMembers),
+      ).not.toThrow();
     });
   });
 
   describe("START_END timeslots", () => {
     it("should throw when startTime is missing", () => {
       const timeslots = [
-        createTestTimeslotSeries({ type: TIMESLOT_TYPE.START_END, startTime: undefined }),
+        createTestTimeslotInput({ type: TIMESLOT_TYPE.START_END, startTime: undefined }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_START_END_REQUIRED_ERROR,
       );
     });
 
     it("should throw when endTime is missing", () => {
       const timeslots = [
-        createTestTimeslotSeries({ type: TIMESLOT_TYPE.START_END, endTime: undefined }),
+        createTestTimeslotInput({ type: TIMESLOT_TYPE.START_END, endTime: undefined }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_START_END_REQUIRED_ERROR,
       );
     });
 
     it("should throw when timeslot is outside event time range", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           type: TIMESLOT_TYPE.START_END,
           startTime: "17:00",
           endTime: "19:00",
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_TIME_RANGE_NOT_MATCH_SCHEDULE_ERROR,
       );
     });
 
     it("should throw when timeslot start time is after end time", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           type: TIMESLOT_TYPE.START_END,
           startTime: "19:00",
           endTime: "18:30",
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         END_TIME_AFTER_START_ERROR,
       );
     });
 
     it("should pass when timeslot times are valid", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           type: TIMESLOT_TYPE.START_END,
           startTime: "18:00",
           endTime: "19:00",
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).not.toThrow();
+      expect(() =>
+        validateEventTimeslots(startTime, endTime, timeslots, clubMembers),
+      ).not.toThrow();
     });
   });
 
   describe("permanent participants validation", () => {
     it("should throw when permanent participants exceed max participants", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           maxParticipants: 5,
           permanentParticipants: [
             user1Id,
@@ -430,65 +528,67 @@ describe("validateEventTimeslots", () => {
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_PERMANENT_PARTICIPANTS_EXCEEDED_MAX_ERROR,
       );
     });
 
     it("should throw when permanent participants are not unique", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           permanentParticipants: [user1Id, user2Id, user1Id],
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR,
       );
     });
 
     it("should throw when permanent participant is not a club member", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           permanentParticipants: [user1Id, genId<"users">("users")],
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         EVENT_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR,
       );
     });
 
     it("should pass when permanent participants are valid", () => {
       const timeslots = [
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           permanentParticipants: [user1Id, user2Id],
         }),
       ];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).not.toThrow();
+      expect(() =>
+        validateEventTimeslots(startTime, endTime, timeslots, clubMembers),
+      ).not.toThrow();
     });
   });
 
   describe("general validation", () => {
     it("should throw when no timeslots provided", () => {
-      expect(() => validateEventTimeslots(baseSchedule, [], clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, [], clubMembers)).toThrow(
         EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
       );
     });
 
     it("should throw when maxParticipants is zero", () => {
-      const timeslots = [createTestTimeslotSeries({ maxParticipants: 0 })];
+      const timeslots = [createTestTimeslotInput({ maxParticipants: 0 })];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR,
       );
     });
 
     it("should throw when FIXED fee type missing fee", () => {
-      const timeslots = [createTestTimeslotSeries({ feeType: FEE_TYPE.FIXED, fee: undefined })];
+      const timeslots = [createTestTimeslotInput({ feeType: FEE_TYPE.FIXED, fee: undefined })];
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR,
       );
     });
@@ -497,16 +597,62 @@ describe("validateEventTimeslots", () => {
   describe("total participants validation", () => {
     it("should throw when total max participants exceed system limit", () => {
       const timeslots = Array.from({ length: 10 }, (_, i) =>
-        createTestTimeslotSeries({
+        createTestTimeslotInput({
           name: `Slot ${i}`,
           maxParticipants: MAX_PARTICIPANTS / 5,
         }),
       );
 
-      expect(() => validateEventTimeslots(baseSchedule, timeslots, clubMembers)).toThrow(
+      expect(() => validateEventTimeslots(startTime, endTime, timeslots, clubMembers)).toThrow(
         TIMESLOT_MAX_PARTICIPANTS_EXCEEDED_ERROR,
       );
     });
+  });
+});
+
+describe("validateEventForCreate", () => {
+  let ctx: QueryCtx;
+  beforeEach(() => {
+    ctx = createMockCtx<QueryCtx>();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should validate single event successfully", async () => {
+    const user = createTestUserRecord();
+    const club = createTestClubRecord(user._id, { isPublic: true });
+    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
+    const eventSeries = createTestEventSeriesRecord(club._id, user._id);
+    const date = Date.now() + ONE_DAY_MS;
+    const event: EventCreateInput = createTestEventRecord(
+      eventSeries._id,
+      club._id,
+      user._id,
+      date,
+      {
+        clubId: club._id,
+        name: "Test Event",
+        description: "Test Description",
+        startTime: "18:00",
+        endTime: "20:00",
+        visibility: EVENT_VISIBILITY.PUBLIC,
+        timeslots: [createTestTimeslot()],
+      },
+    );
+    const mockQuery = {
+      withIndex: vi.fn(() => ({
+        collect: vi.fn().mockResolvedValueOnce(clubMembers),
+      })),
+    };
+    vi.mocked(ctx.db.query).mockReturnValueOnce(
+      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
+    );
+
+    await expect(validateEventForCreate(ctx, event, club)).resolves.not.toThrow();
   });
 });
 
@@ -554,38 +700,12 @@ describe("validateEventSeriesForCreate", () => {
     );
   });
 
-  it("should throw for invalid schedule", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const eventSeries = createTestEventSeriesInput(club._id, {
-      schedule: {
-        startTime: "20:00",
-        endTime: "18:00", // Invalid: end before start
-        startDate: Date.now() + 24 * 60 * 60 * 1000,
-        endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      },
-    });
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
-    );
-
-    await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).rejects.toThrow(
-      END_TIME_AFTER_START_ERROR,
-    );
-  });
-
   it("should throw for invalid timeslots", async () => {
     const user = createTestUserRecord();
     const club = createTestClubRecord(user._id, { isPublic: true });
     const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
     const eventSeries = createTestEventSeriesInput(club._id, {
-      timeslots: [createTestTimeslotSeries({ duration: undefined })],
+      timeslots: [createTestTimeslotInput({ duration: undefined })],
     });
     const mockQuery = {
       withIndex: vi.fn(() => ({
@@ -607,6 +727,7 @@ describe("validateEventStatusForJoinLeave", () => {
     const event = createTestEventRecord(
       genId<"eventSeries">("eventSeries"),
       genId<"clubs">("clubs"),
+      genId<"users">("users"),
       Date.now(),
       { status: EVENT_STATUS.NOT_STARTED },
     );
@@ -618,6 +739,7 @@ describe("validateEventStatusForJoinLeave", () => {
     const event = createTestEventRecord(
       genId<"eventSeries">("eventSeries"),
       genId<"clubs">("clubs"),
+      genId<"users">("users"),
       Date.now(),
       { status: EVENT_STATUS.IN_PROGRESS },
     );
@@ -631,6 +753,7 @@ describe("validateEventStatusForJoinLeave", () => {
     const event = createTestEventRecord(
       genId<"eventSeries">("eventSeries"),
       genId<"clubs">("clubs"),
+      genId<"users">("users"),
       Date.now(),
       { status: EVENT_STATUS.COMPLETED },
     );
@@ -644,6 +767,7 @@ describe("validateEventStatusForJoinLeave", () => {
     const event = createTestEventRecord(
       genId<"eventSeries">("eventSeries"),
       genId<"clubs">("clubs"),
+      genId<"users">("users"),
       Date.now(),
       { status: EVENT_STATUS.CANCELLED },
     );
@@ -682,7 +806,7 @@ describe("validateEventSeriesForUpdate", () => {
     );
 
     await expect(
-      validateEventSeriesForUpdate(ctx, updateInput, club, existingEventSeries),
+      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
     ).resolves.not.toThrow();
   });
 
@@ -693,7 +817,7 @@ describe("validateEventSeriesForUpdate", () => {
     const updateInput = { visibility: EVENT_VISIBILITY.PUBLIC };
 
     await expect(
-      validateEventSeriesForUpdate(ctx, updateInput, club, existingEventSeries),
+      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
     ).rejects.toThrow(EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR);
   });
 
@@ -702,7 +826,7 @@ describe("validateEventSeriesForUpdate", () => {
     const club = createTestClubRecord(user._id, { isPublic: true });
     const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
     const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
-    const updateInput = { timeslots: [createTestTimeslotSeries()] };
+    const updateInput = { timeslots: [createTestTimeslotInput()] };
     const mockQuery = {
       withIndex: vi.fn(() => ({
         collect: vi.fn().mockResolvedValueOnce(clubMembers),
@@ -713,57 +837,24 @@ describe("validateEventSeriesForUpdate", () => {
     );
 
     await expect(
-      validateEventSeriesForUpdate(ctx, updateInput, club, existingEventSeries),
+      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
     ).resolves.not.toThrow();
   });
-});
 
-describe("validateEventScheduleForUpdate", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
-  });
+  it("should validate schedule and recurrence update together", async () => {
+    const user = createTestUserRecord();
+    const club = createTestClubRecord(user._id, { isPublic: true });
+    const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
+    const updateInput = {
+      schedule: {
+        startDate: Date.now() + 2 * ONE_DAY_MS,
+        endDate: Date.now() + SIXTY_DAYS_MS,
+      },
+      recurrence: EVENT_RECURRENCE.WEEKLY,
+    };
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  const existingSchedule = {
-    startTime: "18:00",
-    endTime: "20:00",
-    startDate: Date.now() + 24 * 60 * 60 * 1000,
-    endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  };
-
-  it("should validate partial time update", () => {
-    const scheduleUpdate = { startTime: "19:00" };
-
-    expect(() =>
-      validateEventScheduleForUpdate(scheduleUpdate, EVENT_RECURRENCE.DAILY, existingSchedule),
-    ).not.toThrow();
-  });
-
-  it("should throw when updating both times with invalid range", () => {
-    const scheduleUpdate = { startTime: "20:00", endTime: "18:00" };
-
-    expect(() =>
-      validateEventScheduleForUpdate(scheduleUpdate, EVENT_RECURRENCE.DAILY, existingSchedule),
-    ).toThrow(END_TIME_AFTER_START_ERROR);
-  });
-
-  it("should throw when updating startDate to past for recurring events", () => {
-    const scheduleUpdate = { startDate: Date.now() - 24 * 60 * 60 * 1000 };
-
-    expect(() =>
-      validateEventScheduleForUpdate(scheduleUpdate, EVENT_RECURRENCE.WEEKLY, existingSchedule),
-    ).toThrow(EVENT_START_DATE_FUTURE_ERROR);
-  });
-
-  it("should throw when merged schedule has invalid date range", () => {
-    const scheduleUpdate = { endDate: Date.now() + 12 * 60 * 60 * 1000 }; // Before existing startDate
-
-    expect(() =>
-      validateEventScheduleForUpdate(scheduleUpdate, EVENT_RECURRENCE.WEEKLY, existingSchedule),
-    ).toThrow(EVENT_END_DATE_AFTER_START_ERROR);
+    await expect(
+      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
+    ).resolves.not.toThrow();
   });
 });

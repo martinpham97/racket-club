@@ -19,6 +19,9 @@ export const createMockCtx = <T>(overrides: Partial<T> = {}): T => {
         withIndex: vi.fn(() => ({
           paginate: vi.fn(),
           unique: vi.fn(),
+          order: vi.fn(() => ({
+            paginate: vi.fn(),
+          })),
           eq: indexedOperations,
           gte: indexedOperations,
           lte: indexedOperations,

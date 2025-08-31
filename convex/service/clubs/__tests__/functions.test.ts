@@ -76,7 +76,7 @@ describe("Club Functions", () => {
     });
   });
 
-  describe("listMyClubs", () => {
+  describe("listClubsForUser", () => {
     it("returns user's clubs with membership details", async () => {
       const userId = await userHelpers.insertUser();
       const profile = createTestProfile(userId);
@@ -88,7 +88,8 @@ describe("Club Functions", () => {
       await clubHelpers.insertMembership(membership);
 
       const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.query(api.service.clubs.functions.listMyClubs, {
+      const result = await asUser.query(api.service.clubs.functions.listClubsForUser, {
+        userId,
         pagination: { cursor: null, numItems: 10 },
       });
 
@@ -99,6 +100,26 @@ describe("Club Functions", () => {
           membership: expect.objectContaining(membership),
         }),
       );
+    });
+
+    it("returns empty array if user has no clubs", async () => {
+      const userId = await userHelpers.insertUser();
+      const otherUserId = await userHelpers.insertUser("other@test.com");
+      const profile = createTestProfile(userId);
+      await userHelpers.insertProfile(profile);
+      const club = createTestClub(userId);
+      const clubId = await clubHelpers.insertClub(club);
+
+      const membership = createTestClubMembership(clubId, userId, { name: "Test User" });
+      await clubHelpers.insertMembership(membership);
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.query(api.service.clubs.functions.listClubsForUser, {
+        userId: otherUserId,
+        pagination: { cursor: null, numItems: 10 },
+      });
+
+      expect(result.page).toHaveLength(0);
     });
   });
 
