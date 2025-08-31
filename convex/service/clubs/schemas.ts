@@ -4,7 +4,7 @@ import {
   preferredPlayStyleSchema,
   skillLevelSchema,
 } from "@/convex/service/users/schemas";
-import { zid, zodToConvex } from "convex-helpers/server/zod";
+import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
@@ -71,7 +71,8 @@ export const clubMembershipInputSchema = clubMembershipSchema.pick({
   skillLevel: true,
   preferredPlayStyle: true,
 });
-export type ClubMembershipInput = z.infer<typeof clubMembershipInputSchema>;
+
+export const clubUpdateInputSchema = clubSchema.partial();
 
 export const clubMembershipUpdateInputSchema = clubMembershipSchema
   .pick({
@@ -83,22 +84,25 @@ export const clubMembershipUpdateInputSchema = clubMembershipSchema
     isClubAdmin: true,
   })
   .partial();
-export type ClubMembershipUpdateInput = z.infer<typeof clubMembershipUpdateInputSchema>;
 
 export const clubCreateInputSchema = clubSchema.omit({
   createdBy: true,
   isApproved: true,
   numMembers: true,
 });
-export type ClubCreateInput = z.infer<typeof clubCreateInputSchema>;
 
-export const clubUpdateInputSchema = clubSchema.partial();
+export const clubDetailsSchema = z.object(withSystemFields("clubs", clubSchema.shape)).extend({
+  membership: z.object(withSystemFields("clubMemberships", clubMembershipSchema.shape)),
+});
+
+export type ClubMembershipInput = z.infer<typeof clubMembershipInputSchema>;
+export type ClubMembershipUpdateInput = z.infer<typeof clubMembershipUpdateInputSchema>;
+export type ClubCreateInput = z.infer<typeof clubCreateInputSchema>;
 export type ClubUpdateInput = z.infer<typeof clubUpdateInputSchema>;
 export type Club = DocumentByName<DataModel, "clubs">;
 export type ClubMembership = DocumentByName<DataModel, "clubMemberships">;
-export type ClubDetails = DocumentByName<DataModel, "clubs"> & {
-  membership: ClubMembership;
-};
+export type ClubBan = DocumentByName<DataModel, "clubBans">;
+export type ClubDetails = z.infer<typeof clubDetailsSchema>;
 
 export const clubTable = defineTable(zodToConvex(clubSchema))
   .index("createdBy", ["createdBy"])
@@ -114,8 +118,6 @@ export const clubBanTable = defineTable(zodToConvex(clubBanSchema))
   .index("clubUser", ["clubId", "userId"])
   .index("clubActive", ["clubId", "isActive"])
   .index("userId", ["userId"]);
-
-export type ClubBan = DocumentByName<DataModel, "clubBans">;
 
 export const clubTables = {
   clubs: clubTable,

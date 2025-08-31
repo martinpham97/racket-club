@@ -1,5 +1,5 @@
 import { DataModel } from "@/convex/_generated/dataModel";
-import { zid, zodToConvex } from "convex-helpers/server/zod";
+import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
@@ -25,26 +25,35 @@ export const userProfileSchema = z.object({
   isAdmin: z.boolean(),
 });
 
-export const userProfileCreateSchema = userProfileSchema.omit({ isAdmin: true });
-export type UserProfileCreateInput = z.infer<typeof userProfileCreateSchema>;
+const baseUserDetailsSchema = z.object({
+  ...withSystemFields("users", { email: z.string().optional() }),
+});
 
+const userProfileWithSystemFields = z.object(
+  withSystemFields("userProfiles", userProfileSchema.shape),
+);
+
+export const userDetailsSchema = baseUserDetailsSchema.extend({
+  profile: userProfileWithSystemFields.nullable(),
+});
+
+export const userDetailsWithProfileSchema = baseUserDetailsSchema.extend({
+  profile: userProfileWithSystemFields,
+});
+
+export const userProfileCreateSchema = userProfileSchema.omit({ isAdmin: true });
 export const userProfileUpdateSchema = userProfileCreateSchema.partial().required({ userId: true });
+
+export type UserProfileCreateInput = z.infer<typeof userProfileCreateSchema>;
 export type UserProfileUpdateInput = z.infer<typeof userProfileUpdateSchema>;
+export type User = DocumentByName<DataModel, "users">;
+export type UserProfile = DocumentByName<DataModel, "userProfiles">;
+export type UserDetails = z.infer<typeof userDetailsSchema>;
+export type UserDetailsWithProfile = z.infer<typeof userDetailsWithProfileSchema>;
 
 export const userProfileTable = defineTable(zodToConvex(userProfileSchema))
   .index("userId", ["userId"])
   .index("isAdmin", ["isAdmin"]);
-
-export type User = DocumentByName<DataModel, "users">;
-export type UserProfile = DocumentByName<DataModel, "userProfiles">;
-
-export interface UserDetails extends User {
-  profile: UserProfile | null;
-}
-
-export interface UserDetailsWithProfile extends User {
-  profile: UserProfile;
-}
 
 export const userTables = {
   userProfiles: userProfileTable,

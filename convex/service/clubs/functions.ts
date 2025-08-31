@@ -16,7 +16,7 @@ import {
   createActivity as dtoCreateActivity,
   listActivitiesForResource as dtoListActivitiesForResource,
 } from "@/convex/service/activities/database";
-import { ActivityMetadata } from "@/convex/service/activities/schemas";
+import { ActivityMetadata, activitySchema } from "@/convex/service/activities/schemas";
 import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
 import {
   authenticatedMutationWithRLS,
@@ -36,10 +36,11 @@ import {
 } from "@/convex/service/utils/validators/clubs";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
 import { getOrThrow } from "convex-helpers/server/relationships";
-import { convexToZod, zid } from "convex-helpers/server/zod";
+import { convexToZod, withSystemFields, zid } from "convex-helpers/server/zod";
 import { paginationOptsValidator, WithoutSystemFields } from "convex/server";
 import { ConvexError } from "convex/values";
 import { z } from "zod";
+import { paginatedResult } from "../utils/pagination";
 import {
   createClub as dtoCreateClub,
   deleteAllClubMemberships as dtoDeleteAllClubMemberships,
@@ -52,11 +53,15 @@ import {
 import {
   Club,
   clubBanReasonSchema,
+  clubBanSchema,
   clubCreateInputSchema,
+  clubDetailsSchema,
   ClubMembership,
   ClubMembershipInput,
   clubMembershipInputSchema,
+  clubMembershipSchema,
   clubMembershipUpdateInputSchema,
+  clubSchema,
   clubUpdateInputSchema,
 } from "./schemas";
 
@@ -77,6 +82,7 @@ interface AddUserToClubOptions {
  */
 export const listPublicClubs = publicQueryWithRLS()({
   args: { pagination: convexToZod(paginationOptsValidator) },
+  returns: paginatedResult(z.object(withSystemFields("clubs", clubSchema.shape))),
   handler: async (ctx, args) => await dtoListPublicClubs(ctx, args.pagination),
 });
 
@@ -91,6 +97,7 @@ export const listClubsForUser = authenticatedQueryWithRLS()({
     userId: zid("users"),
     pagination: convexToZod(paginationOptsValidator),
   },
+  returns: paginatedResult(clubDetailsSchema),
   handler: async (ctx, args) => {
     return await dtoListClubsForUser(ctx, args.userId, args.pagination);
   },
@@ -104,6 +111,7 @@ export const listClubsForUser = authenticatedQueryWithRLS()({
  */
 export const getClub = publicQueryWithRLS()({
   args: { clubId: zid("clubs") },
+  returns: z.object(withSystemFields("clubs", clubSchema.shape)),
   handler: async (ctx, args) => await getOrThrow(ctx, args.clubId),
 });
 
@@ -119,6 +127,7 @@ export const listClubActivities = authenticatedQueryWithRLS()({
     clubId: zid("clubs"),
     pagination: convexToZod(paginationOptsValidator),
   },
+  returns: paginatedResult(z.object(withSystemFields("activities", activitySchema.shape))),
   handler: async (ctx, args) => {
     await getOrThrow(ctx, args.clubId);
     const membership = await dtoGetClubMembershipForUser(ctx, args.clubId, ctx.currentUser._id);
@@ -128,6 +137,30 @@ export const listClubActivities = authenticatedQueryWithRLS()({
     }
 
     return await dtoListActivitiesForResource(ctx, args.clubId, args.pagination);
+  },
+});
+
+/**
+ * Lists banned users for a club. Only club owner, club admin, or system admin can view bans.
+ * @param clubId - ID of the club
+ * @param pagination - Pagination options (cursor, numItems)
+ * @returns Paginated list of banned users
+ * @throws ConvexError when club doesn't exist or user lacks permissions
+ */
+export const listClubBans = authenticatedQueryWithRLS()({
+  args: {
+    clubId: zid("clubs"),
+    pagination: convexToZod(paginationOptsValidator),
+  },
+  returns: paginatedResult(z.object(withSystemFields("clubBans", clubBanSchema.shape))),
+  handler: async (ctx, args) => {
+    const club = await getOrThrow(ctx, args.clubId);
+    await enforceClubMembershipPermissions(ctx, club);
+
+    return ctx.db
+      .query("clubBans")
+      .withIndex("clubActive", (q) => q.eq("clubId", args.clubId).eq("isActive", true))
+      .paginate(args.pagination);
   },
 });
 
@@ -148,6 +181,7 @@ export const joinClub = authenticatedMutationWithRLS()({
     clubId: zid("clubs"),
     membershipInfo: clubMembershipInputSchema.optional(),
   },
+  returns: clubMembershipSchema,
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "joinClub", ctx.currentUser._id + args.clubId);
     const club = await getOrThrow(ctx, args.clubId);
@@ -224,6 +258,7 @@ export const createClub = authenticatedMutationWithRLS()({
     input: clubCreateInputSchema,
     membershipInfo: clubMembershipInputSchema.optional(),
   },
+  returns: zid("clubs"),
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "createClub", ctx.currentUser._id);
     await validateClubName(ctx, args.input.name, args.input.isPublic);
@@ -361,6 +396,7 @@ export const removeClubMember = authenticatedMutationWithRLS()({
  */
 export const approveClubMemberships = authenticatedMutationWithRLS()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
+  returns: z.number(),
   handler: async (ctx, args) => {
     const { memberships, clubId } = await validateBulkMemberships(ctx, args.membershipIds);
     if (memberships.length === 0 || !clubId) {
@@ -396,6 +432,7 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
  */
 export const bulkRemoveMembers = authenticatedMutationWithRLS()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
+  returns: z.number(),
   handler: async (ctx, args) => {
     const { memberships, clubId } = await validateBulkMemberships(ctx, args.membershipIds);
     if (memberships.length === 0 || !clubId) {
@@ -496,29 +533,6 @@ export const unbanClubMember = authenticatedMutationWithRLS()({
     await createClubActivity(ctx, args.clubId, args.userId, ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED, [
       { previousValue: ban.reason },
     ]);
-  },
-});
-
-/**
- * Lists banned users for a club. Only club owner, club admin, or system admin can view bans.
- * @param clubId - ID of the club
- * @param pagination - Pagination options (cursor, numItems)
- * @returns Paginated list of banned users
- * @throws ConvexError when club doesn't exist or user lacks permissions
- */
-export const listClubBans = authenticatedQueryWithRLS()({
-  args: {
-    clubId: zid("clubs"),
-    pagination: convexToZod(paginationOptsValidator),
-  },
-  handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.clubId);
-    await enforceClubMembershipPermissions(ctx, club);
-
-    return ctx.db
-      .query("clubBans")
-      .withIndex("clubActive", (q) => q.eq("clubId", args.clubId).eq("isActive", true))
-      .paginate(args.pagination);
   },
 });
 

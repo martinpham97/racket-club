@@ -15,17 +15,20 @@ import {
 import { enforceOwnershipOrAdmin } from "@/convex/service/utils/validators/auth";
 import { validateDateOfBirth } from "@/convex/service/utils/validators/profile";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
-import { convexToZod, zid } from "convex-helpers/server/zod";
+import { convexToZod, withSystemFields, zid } from "convex-helpers/server/zod";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError } from "convex/values";
+import z from "zod";
+import { activitySchema } from "../activities/schemas";
 import { getMetadata } from "../utils/metadata";
+import { paginatedResult } from "../utils/pagination";
 import {
   createUserProfile as dtoCreateUserProfile,
   getCurrentUser as dtoGetCurrentUser,
   getProfileByUserId as dtoGetProfileByUserId,
   updateUserProfile as dtoUpdateUserProfile,
 } from "./database";
-import { userProfileCreateSchema, userProfileUpdateSchema } from "./schemas";
+import { userDetailsSchema, userProfileCreateSchema, userProfileUpdateSchema } from "./schemas";
 
 /**
  * Gets the current authenticated user with their profile information.
@@ -33,6 +36,7 @@ import { userProfileCreateSchema, userProfileUpdateSchema } from "./schemas";
  */
 export const getCurrentUser = publicQueryWithRLS()({
   args: {},
+  returns: userDetailsSchema.nullable(),
   handler: async (ctx) => await dtoGetCurrentUser(ctx),
 });
 
@@ -46,6 +50,7 @@ export const listUserActivities = authenticatedQueryWithRLS()({
     userId: zid("users"),
     pagination: convexToZod(paginationOptsValidator),
   },
+  returns: paginatedResult(z.object(withSystemFields("activities", activitySchema.shape))),
   handler: async (ctx, args) => {
     enforceOwnershipOrAdmin(ctx.currentUser, args.userId);
     return await dtoListActivityForUser(ctx, args.userId, args.pagination);
@@ -61,6 +66,7 @@ export const listUserActivities = authenticatedQueryWithRLS()({
  */
 export const createUserProfile = authenticatedMutationWithRLS({ profileRequired: false })({
   args: userProfileCreateSchema,
+  returns: zid("userProfiles"),
   handler: async (ctx, args) => {
     const { currentUser } = ctx;
     enforceOwnershipOrAdmin(currentUser, args.userId);

@@ -27,7 +27,7 @@ import {
   TIME_FORMAT_REGEX,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import { zid, zodToConvex } from "convex-helpers/server/zod";
+import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
 import { defineTable, DocumentByName } from "convex/server";
 import z from "zod";
 
@@ -198,6 +198,10 @@ export const eventFiltersSchema = z.object({
   placeId: z.string().optional(),
 });
 
+export const eventDetailsSchema = z.object(withSystemFields("events", eventSchema.shape)).extend({
+  participation: z.object(withSystemFields("eventParticipants", eventParticipantSchema.shape)),
+});
+
 export type EventSeries = DocumentByName<DataModel, "eventSeries">;
 export type Event = DocumentByName<DataModel, "events">;
 export type EventParticipant = DocumentByName<DataModel, "eventParticipants">;
@@ -211,9 +215,7 @@ export type EventCreateInput = z.infer<typeof eventCreateInputSchema>;
 export type TimeslotInput = z.infer<typeof timeslotInputSchema>;
 export type Timeslot = z.infer<typeof timeslotSchema>;
 export type EventFilters = z.infer<typeof eventFiltersSchema>;
-export type EventDetails = DocumentByName<DataModel, "events"> & {
-  participation: EventParticipant;
-};
+export type EventDetails = z.infer<typeof eventDetailsSchema>;
 
 export const eventSeriesTable = defineTable(zodToConvex(eventSeriesSchema)).index("clubId", [
   "clubId",
