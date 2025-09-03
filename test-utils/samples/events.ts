@@ -1,6 +1,5 @@
 import { Id } from "@/convex/_generated/dataModel";
 import {
-  EVENT_RECURRENCE,
   EVENT_STATUS,
   EVENT_TYPE,
   EVENT_VISIBILITY,
@@ -59,7 +58,8 @@ export const createTestEventSeriesInput = (
   startTime: "09:00",
   endTime: "11:00",
   schedule: {
-    dayOfWeek: 1,
+    daysOfWeek: [1],
+    interval: 1,
     startDate: Date.now() + 60 * 60 * 1000,
     endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
   },
@@ -69,7 +69,6 @@ export const createTestEventSeriesInput = (
     min: 1,
     max: 5,
   },
-  recurrence: EVENT_RECURRENCE.WEEKLY,
   timeslots: [createTestTimeslotInput()],
   isActive: true,
   ...overrides,

@@ -7,6 +7,7 @@ import {
   CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
+  CLUB_USER_BANNED_ERROR,
 } from "@/convex/constants/errors";
 import * as clubDatabase from "@/convex/service/clubs/database";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
@@ -19,9 +20,14 @@ import {
   validateClubName,
   validateClubUpdateInput,
   validateMembershipExists,
+  validateUserNotBanned,
 } from "@/convex/service/utils/validators/clubs";
 import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestClubMembershipRecord, createTestClubRecord } from "@/test-utils/samples/clubs";
+import {
+  createTestClubBanRecord,
+  createTestClubMembershipRecord,
+  createTestClubRecord,
+} from "@/test-utils/samples/clubs";
 import { createTestUserRecord } from "@/test-utils/samples/users";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +36,7 @@ vi.mock("@/convex/service/clubs/database");
 
 const mockIsOwnerOrSystemAdmin = vi.mocked(authModule.isOwnerOrSystemAdmin);
 const mockGetClubMembershipForUser = vi.mocked(clubDatabase.getClubMembershipForUser);
+const mockGetClubBanRecordForUser = vi.mocked(clubDatabase.getClubBanRecordForUser);
 
 describe("enforceClubOwnershipOrAdmin", () => {
   let mockCtx: AuthenticatedWithProfileCtx;
@@ -488,5 +495,37 @@ describe("validateBulkMemberships", () => {
         "id2" as Id<"clubMemberships">,
       ]),
     ).rejects.toThrow(CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR);
+  });
+});
+
+describe("validateUserNotBanned", () => {
+  let mockCtx: QueryCtx;
+  let testUser: ReturnType<typeof createTestUserRecord>;
+  let testClub: ReturnType<typeof createTestClubRecord>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    testUser = createTestUserRecord();
+    testClub = createTestClubRecord(testUser._id);
+    mockCtx = createMockCtx<QueryCtx>();
+  });
+
+  it("should pass when user is not banned", async () => {
+    mockGetClubBanRecordForUser.mockResolvedValue(null);
+
+    await expect(validateUserNotBanned(mockCtx, testClub, testUser._id)).resolves.toBeUndefined();
+
+    expect(mockGetClubBanRecordForUser).toHaveBeenCalledWith(mockCtx, testClub._id, testUser._id);
+  });
+
+  it("should throw when user is banned", async () => {
+    const banRecord = createTestClubBanRecord(testClub._id, testUser._id);
+    mockGetClubBanRecordForUser.mockResolvedValue(banRecord);
+
+    await expect(validateUserNotBanned(mockCtx, testClub, testUser._id)).rejects.toThrow(
+      CLUB_USER_BANNED_ERROR,
+    );
+
+    expect(mockGetClubBanRecordForUser).toHaveBeenCalledWith(mockCtx, testClub._id, testUser._id);
   });
 });

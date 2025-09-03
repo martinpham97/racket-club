@@ -9,6 +9,7 @@ import {
   listAllClubMembers,
   listClubsForUser,
   listPublicClubs,
+  listUserClubIds,
   updateClub,
 } from "@/convex/service/clubs/database";
 import {
@@ -248,6 +249,35 @@ describe("Club Database Service", () => {
 
       expect(result).toHaveLength(2);
       expect(result.every((member) => member.clubId === clubId)).toBe(true);
+    });
+  });
+
+  describe("listUserClubIds", () => {
+    it("returns club IDs where user is a member", async () => {
+      const userId = await userHelpers.insertUser();
+      const clubId1 = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId2 = await clubHelpers.insertClub(createTestClub(userId));
+
+      await clubHelpers.insertMembership(createTestClubMembership(clubId1, userId));
+      await clubHelpers.insertMembership(createTestClubMembership(clubId2, userId));
+
+      const result = await t.run(async (ctx) => {
+        return await listUserClubIds(ctx, userId);
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result).toContain(clubId1);
+      expect(result).toContain(clubId2);
+    });
+
+    it("returns empty array when user has no memberships", async () => {
+      const userId = await userHelpers.insertUser();
+
+      const result = await t.run(async (ctx) => {
+        return await listUserClubIds(ctx, userId);
+      });
+
+      expect(result).toHaveLength(0);
     });
   });
 });

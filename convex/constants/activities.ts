@@ -12,6 +12,9 @@ export const ACTIVITY_TYPES = {
   USER_CREATED: "user:created",
   USER_PROFILE_CREATED: "user:profile-created",
   USER_PROFILE_UPDATED: "user:profile-updated",
+  EVENT_SERIES_DEACTIVATION_SCHEDULED: "eventSeries:deactivation-scheduled",
+  EVENT_IN_PROGRESS_SCHEDULED: "event:in_progress-scheduled",
+  EVENT_COMPLETED_SCHEDULED: "event:completed-scheduled",
 } as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[keyof typeof ACTIVITY_TYPES];

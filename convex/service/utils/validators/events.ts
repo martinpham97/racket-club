@@ -1,15 +1,14 @@
+import { Id } from "@/convex/_generated/dataModel";
 import { QueryCtx } from "@/convex/_generated/server";
 import {
+  AUTH_ACCESS_DENIED_ERROR,
   END_TIME_AFTER_START_ERROR,
   EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR,
   EVENT_DATE_FUTURE_ERROR,
+  EVENT_DATE_RANGE_INVALID_ERROR,
   EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
-  EVENT_DAY_OF_MONTH_REQUIRED_ERROR,
-  EVENT_DAY_OF_WEEK_REQUIRED_ERROR,
   EVENT_END_DATE_AFTER_START_ERROR,
-  EVENT_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE,
-  EVENT_INVALID_RECURRENCE_ERROR,
-  EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
+  EVENT_SERIES_DURATION_EXCEEDED_ERROR_TEMPLATE,
   EVENT_START_DATE_FUTURE_ERROR,
   EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
   EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR,
@@ -25,20 +24,20 @@ import {
   TIMESLOT_TIME_RANGE_NOT_MATCH_SCHEDULE_ERROR,
 } from "@/convex/constants/errors";
 import {
-  EVENT_RECURRENCE,
   EVENT_STATUS,
   EVENT_VISIBILITY,
   FEE_TYPE,
+  MAX_EVENT_GENERATION_DATE_RANGE_DAYS,
+  MAX_EVENT_SERIES_DURATION_MONTHS,
   MAX_EVENT_START_DATE_DAYS_FROM_NOW,
   MAX_PARTICIPANTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import { listAllClubMembers } from "@/convex/service/clubs/database";
+import { getClubMembershipForUser, listAllClubMembers } from "@/convex/service/clubs/database";
 import { Club, ClubMembership } from "@/convex/service/clubs/schemas";
 import {
   Event,
   EventCreateInput,
-  EventRecurrence,
   EventSchedule,
   EventSeries,
   EventSeriesCreateInput,
@@ -47,8 +46,9 @@ import {
   TimeslotInput,
 } from "@/convex/service/events/schemas";
 import { getTimeDurationInMinutes } from "@/convex/service/utils/time";
+import { getOrThrow } from "convex-helpers/server/relationships";
 import { ConvexError } from "convex/values";
-import { differenceInDays } from "date-fns";
+import { differenceInDays, differenceInMonths, isFuture } from "date-fns";
 import format from "string-template";
 
 /**
@@ -110,10 +110,10 @@ export const validateEventSeriesForCreate = async (
   eventSeries: EventSeriesCreateInput,
   club: Club,
 ): Promise<void> => {
-  const { recurrence, schedule, startTime, endTime, timeslots, visibility } = eventSeries;
+  const { schedule, startTime, endTime, timeslots, visibility } = eventSeries;
   validateEventVisibility(club, visibility);
   validateEventTime(startTime, endTime);
-  validateEventSchedule(schedule, recurrence);
+  validateRecurringSchedule(schedule);
   const clubMembers = await listAllClubMembers(ctx, club._id);
   validateEventTimeslots(startTime, endTime, timeslots, clubMembers);
 };
@@ -149,7 +149,7 @@ export const validateEventForCreate = async (
  */
 export const validateEventDate = (date: number): void => {
   const now = Date.now();
-  if (date <= now) {
+  if (!isFuture(date)) {
     throw new ConvexError(EVENT_DATE_FUTURE_ERROR);
   }
   if (Math.abs(differenceInDays(now, date)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
@@ -175,9 +175,6 @@ export const validateEventVisibility = (club: Club, eventVisibility: EventVisibi
  * @throws {ConvexError} When startDate or endDate missing, dates invalid, or too far in future
  */
 export const validateRecurringSchedule = (schedule: EventSchedule): void => {
-  if (schedule.startDate === undefined || schedule.endDate === undefined) {
-    throw new ConvexError(EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR);
-  }
   const now = Date.now();
   if (schedule.startDate <= now) {
     throw new ConvexError(EVENT_START_DATE_FUTURE_ERROR);
@@ -187,6 +184,16 @@ export const validateRecurringSchedule = (schedule: EventSchedule): void => {
   }
   if (Math.abs(differenceInDays(now, schedule.startDate)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
     throw new ConvexError(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
+  }
+  if (
+    Math.abs(differenceInMonths(schedule.startDate, schedule.endDate)) >=
+    MAX_EVENT_SERIES_DURATION_MONTHS
+  ) {
+    throw new ConvexError(
+      format(EVENT_SERIES_DURATION_EXCEEDED_ERROR_TEMPLATE, {
+        months: MAX_EVENT_SERIES_DURATION_MONTHS,
+      }),
+    );
   }
 };
 
@@ -199,49 +206,6 @@ export const validateRecurringSchedule = (schedule: EventSchedule): void => {
 export const validateEventTime = (startTime: string, endTime: string): void => {
   if (startTime >= endTime) {
     throw new ConvexError(END_TIME_AFTER_START_ERROR);
-  }
-};
-
-/**
- * Validates event schedule based on recurrence type
- * @param schedule - Event schedule object with times and dates
- * @param recurrence - Type of recurrence (DAILY, WEEKLY, MONTHLY)
- * @throws {ConvexError} Various errors based on recurrence type and missing/invalid fields
- */
-export const validateEventSchedule = (
-  schedule: EventSchedule,
-  recurrence: EventRecurrence,
-): void => {
-  const throwUnnecessaryParameterError = (parameter: string, recurrence: string): void => {
-    throw new ConvexError(
-      format(EVENT_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE, { parameter, recurrence }),
-    );
-  };
-
-  switch (recurrence) {
-    case EVENT_RECURRENCE.DAILY:
-      validateRecurringSchedule(schedule);
-      if (schedule.dayOfWeek) throwUnnecessaryParameterError("dayOfWeek", "daily");
-      if (schedule.dayOfMonth) throwUnnecessaryParameterError("dayOfMonth", "daily");
-      break;
-
-    case EVENT_RECURRENCE.WEEKLY:
-      if (schedule.dayOfWeek === undefined) {
-        throw new ConvexError(EVENT_DAY_OF_WEEK_REQUIRED_ERROR);
-      }
-      validateRecurringSchedule(schedule);
-      if (schedule.dayOfMonth) throwUnnecessaryParameterError("dayOfMonth", "weekly");
-      break;
-
-    case EVENT_RECURRENCE.MONTHLY:
-      if (schedule.dayOfMonth === undefined) {
-        throw new ConvexError(EVENT_DAY_OF_MONTH_REQUIRED_ERROR);
-      }
-      validateRecurringSchedule(schedule);
-      if (schedule.dayOfWeek) throwUnnecessaryParameterError("dayOfWeek", "monthly");
-      break;
-    default:
-      throw new ConvexError(EVENT_INVALID_RECURRENCE_ERROR);
   }
 };
 
@@ -274,7 +238,7 @@ export const validateEventTimeslots = (
     throw new ConvexError(EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR);
   }
 
-  const memberUserIds = new Set(clubMembers.map((m) => m.userId));
+  const memberUserIds = new Set((clubMembers || []).map((m) => m.userId));
 
   timeslots.forEach((timeslotInput) => {
     if (timeslotInput.maxParticipants <= 0) {
@@ -337,15 +301,14 @@ export const validateEventSeriesForUpdate = async (
   existingEventSeries: EventSeries,
   eventSeriesUpdate: EventSeriesUpdateInput,
 ): Promise<void> => {
-  const { schedule, recurrence, timeslots, visibility, startTime, endTime } = eventSeriesUpdate;
+  const { schedule, timeslots, visibility, startTime, endTime } = eventSeriesUpdate;
 
   if (visibility) {
     validateEventVisibility(club, visibility);
   }
 
   const scheduleToUse: EventSchedule = { ...existingEventSeries.schedule, ...schedule };
-  const recurrenceToUse: EventRecurrence = recurrence || existingEventSeries.recurrence;
-  validateEventSchedule(scheduleToUse, recurrenceToUse);
+  validateRecurringSchedule(scheduleToUse);
 
   const startTimeToUse = startTime || existingEventSeries.startTime;
   const endTimeToUse = endTime || existingEventSeries.endTime;
@@ -365,5 +328,54 @@ export const validateEventSeriesForUpdate = async (
 export const validateEventStatusForJoinLeave = (event: Event) => {
   if (event.status !== EVENT_STATUS.NOT_STARTED) {
     throw new ConvexError(EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR);
+  }
+};
+
+/**
+ * Validates that a date range does not exceed 30 days.
+ * @param data - Object containing fromDate and toDate timestamps
+ * @returns true if the date range is within 30 days, false otherwise
+ */
+export const isEventDateRangeValid = (data: { fromDate: number; toDate: number }): boolean => {
+  if (data.toDate < data.fromDate) {
+    return false;
+  }
+  return differenceInDays(data.toDate, data.fromDate) <= MAX_EVENT_GENERATION_DATE_RANGE_DAYS;
+};
+
+/**
+ * Validates that a date range does not exceed the maximum allowed days
+ * @param fromDate - Start date timestamp
+ * @param toDate - End date timestamp
+ * @throws {ConvexError} EVENT_DATE_RANGE_INVALID_ERROR - When date range exceeds maximum allowed days
+ */
+export const validateEventDateRange = (fromDate: number, toDate: number): void => {
+  if (!isEventDateRangeValid({ fromDate, toDate })) {
+    throw new ConvexError(EVENT_DATE_RANGE_INVALID_ERROR);
+  }
+};
+
+/**
+ * Validates that a user has access to view an event based on visibility settings
+ * @param ctx - Query context
+ * @param event - Event to validate access for
+ * @param userId - User ID requesting access
+ * @throws {ConvexError} AUTH_ACCESS_DENIED_ERROR - When user lacks permission to access the event
+ */
+export const validateEventAccess = async (
+  ctx: QueryCtx,
+  event: Event,
+  userId: Id<"users">,
+): Promise<void> => {
+  if (event.visibility === EVENT_VISIBILITY.PUBLIC) {
+    return;
+  }
+
+  if (event.visibility === EVENT_VISIBILITY.MEMBERS_ONLY) {
+    const club = await getOrThrow(ctx, event.clubId);
+    const membership = await getClubMembershipForUser(ctx, club._id, userId);
+    if (!membership) {
+      throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
+    }
   }
 };

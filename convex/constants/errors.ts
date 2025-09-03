@@ -81,7 +81,6 @@ export const EVENT_VISIBILITY_ERROR = "You cannot access this event.";
 
 export const EVENT_DATE_FUTURE_ERROR = "Date must be in the future.";
 export const EVENT_DAY_OF_MONTH_REQUIRED_ERROR = "Day of month is required for monthly events.";
-export const EVENT_DAY_OF_WEEK_REQUIRED_ERROR = "Day of week is required for weekly events.";
 export const EVENT_END_DATE_AFTER_START_ERROR = "End date must be after start date.";
 export const EVENT_INVALID_RECURRENCE_ERROR = "Invalid event recurrence setting.";
 export const EVENT_SCHEDULE_REQUIRED_ERROR = "Schedule is required.";
@@ -134,6 +133,11 @@ export const EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR =
 export const EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR =
   "Event starting date is too far in the future. Please keep the event starting date within 30 days from now.";
 
+export const EVENT_SERIES_DURATION_EXCEEDED_ERROR_TEMPLATE =
+  "Event series can only be active for no longer than {months} months.}";
+
+export const EVENT_SERIES_DAYS_OF_WEEK_NOT_UNIQUE_ERROR = "Days of week must be unique.";
+
 export const EVENT_INVALID_PARAMETER_FOR_RECURRENCE_ERROR_TEMPLATE =
   "{parameter} is not allowed for {recurrence} events.";
 
@@ -155,3 +159,5 @@ export const EVENT_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR =
 
 export const EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR =
   "Permanent participants must be unique.";
+
+export const EVENT_DATE_RANGE_INVALID_ERROR = "Date range cannot exceed 1 month (30 days).";

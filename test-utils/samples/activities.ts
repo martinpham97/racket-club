@@ -15,6 +15,7 @@ export const createTestActivity = (
   type: ACTIVITY_TYPES.CLUB_CREATED,
   createdBy: createdBy || genId<"users">("users"),
   createdAt: Date.now(),
+  date: Date.now(),
   ...overrides,
 });
 
@@ -41,7 +42,7 @@ export class ActivityTestHelpers {
     return await this.t.run(async (ctx) =>
       ctx.db
         .query("activities")
-        .withIndex("resourceCreatedAt", (q) => q.eq("resourceId", resourceId))
+        .withIndex("resourceDate", (q) => q.eq("resourceId", resourceId))
         .order("desc")
         .collect(),
     );

@@ -105,7 +105,6 @@ export type ClubBan = DocumentByName<DataModel, "clubBans">;
 export type ClubDetails = z.infer<typeof clubDetailsSchema>;
 
 export const clubTable = defineTable(zodToConvex(clubSchema))
-  .index("createdBy", ["createdBy"])
   .index("publicApproved", ["isPublic", "isApproved"])
   .index("publicName", ["isPublic", "name"]);
 

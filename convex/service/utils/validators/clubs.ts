@@ -7,8 +7,9 @@ import {
   CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
+  CLUB_USER_BANNED_ERROR,
 } from "@/convex/constants/errors";
-import { getClubMembershipForUser } from "@/convex/service/clubs/database";
+import { getClubBanRecordForUser, getClubMembershipForUser } from "@/convex/service/clubs/database";
 import { Club, ClubMembership, ClubUpdateInput } from "@/convex/service/clubs/schemas";
 import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
 import { ConvexError } from "convex/values";
@@ -164,4 +165,22 @@ export const validateBulkMemberships = async (
   }
 
   return { memberships: validMemberships, clubId };
+};
+
+/**
+ * Validates that a user is not banned from a club
+ * @param ctx Query context
+ * @param club Club to check ban status for
+ * @param userId User ID to validate
+ * @throws ConvexError When user is banned from the club
+ */
+export const validateUserNotBanned = async (
+  ctx: QueryCtx,
+  club: Club,
+  userId: Id<"users">,
+): Promise<void> => {
+  const ban = await getClubBanRecordForUser(ctx, club._id, userId);
+  if (ban) {
+    throw new ConvexError(CLUB_USER_BANNED_ERROR);
+  }
 };

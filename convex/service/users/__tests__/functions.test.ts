@@ -257,6 +257,7 @@ describe("User Functions", () => {
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdBy: userId,
         createdAt: Date.now(),
+        date: Date.now(),
       });
       await activityHelpers.insertActivity({
         resourceId: profileId,
@@ -264,6 +265,7 @@ describe("User Functions", () => {
         type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
         createdBy: userId,
         createdAt: Date.now(),
+        date: Date.now(),
       });
 
       const asUser = t.withIdentity({ subject: userId });
@@ -304,6 +306,7 @@ describe("User Functions", () => {
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdBy: userId,
         createdAt: Date.now(),
+        date: Date.now(),
       });
 
       const asAdmin = t.withIdentity({ subject: adminId });

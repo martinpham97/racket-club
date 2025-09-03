@@ -5,8 +5,9 @@ import {
   createActivity,
   deleteActivitiesForResource,
   getActivity,
+  getScheduledActivityForResource,
+  listActivitiesForRelatedResource,
   listActivitiesForResource,
-  listActivitiesForUser,
 } from "@/convex/service/activities/database";
 import { ActivityTestHelpers, createTestActivity } from "@/test-utils/samples/activities";
 import { ClubTestHelpers, createTestClub } from "@/test-utils/samples/clubs";
@@ -78,10 +79,29 @@ describe("Activity Database Service", () => {
       expect(savedActivity).not.toBeNull();
       expect(savedActivity!.resourceId).toBe(clubId);
       expect(savedActivity!.createdBy).toBe(userId);
+      expect(savedActivity!.createdAt).toBeDefined();
+      expect(savedActivity!.date).toEqual(savedActivity!.createdAt);
     });
   });
 
-  describe("listActivitiesForUser", () => {
+  it("auto populates date with scheduled time when creating a new scheduled activity", async () => {
+    const userId = await userHelpers.insertUser();
+    const clubId = await clubHelpers.insertClub(createTestClub(userId));
+    const activity = createTestActivity(clubId, userId, { scheduledAt: Date.now() + 3000 });
+
+    const activityId = await t.run(async (ctx) => {
+      return await createActivity(ctx, activity);
+    });
+
+    const savedActivity = await activityHelpers.getActivity(activityId);
+    expect(savedActivity).not.toBeNull();
+    expect(savedActivity!.resourceId).toBe(clubId);
+    expect(savedActivity!.createdBy).toBe(userId);
+    expect(savedActivity!.createdAt).toBeDefined();
+    expect(savedActivity!.date).toEqual(activity.scheduledAt);
+  });
+
+  describe("listActivitiesForRelatedResource", () => {
     it("returns paginated activities for user", async () => {
       const userId = await userHelpers.insertUser();
       const clubId = await clubHelpers.insertClub(createTestClub(userId));
@@ -93,7 +113,7 @@ describe("Activity Database Service", () => {
       await activityHelpers.insertActivity(activity2);
 
       const result = await t.run(async (ctx) => {
-        return await listActivitiesForUser(ctx, userId, { cursor: null, numItems: 10 });
+        return await listActivitiesForRelatedResource(ctx, userId, { cursor: null, numItems: 10 });
       });
 
       expect(result.page).toHaveLength(2);
@@ -117,7 +137,7 @@ describe("Activity Database Service", () => {
       await activityHelpers.insertActivity(activity2);
 
       const result = await t.run(async (ctx) => {
-        return await listActivitiesForUser(ctx, userId, { cursor: null, numItems: 10 });
+        return await listActivitiesForRelatedResource(ctx, userId, { cursor: null, numItems: 10 });
       });
 
       expect(result.page).toHaveLength(2);
@@ -145,6 +165,106 @@ describe("Activity Database Service", () => {
       });
 
       expect(remainingActivities.page).toHaveLength(0);
+    });
+  });
+
+  describe("listScheduledActivityForResource", () => {
+    it("returns scheduled activity for resource at specific time and type", async () => {
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const scheduledTime = Date.now() + 60000;
+
+      const activity = createTestActivity(clubId, userId, {
+        scheduledAt: scheduledTime,
+        type: ACTIVITY_TYPES.CLUB_UPDATED,
+      });
+
+      await activityHelpers.insertActivity(activity);
+
+      const result = await t.run(async (ctx) => {
+        return await getScheduledActivityForResource(
+          ctx,
+          clubId,
+          scheduledTime,
+          ACTIVITY_TYPES.CLUB_UPDATED,
+        );
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.scheduledAt).toBe(scheduledTime);
+      expect(result!.type).toBe(ACTIVITY_TYPES.CLUB_UPDATED);
+    });
+
+    it("returns null when no matching activity found", async () => {
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const scheduledTime = Date.now() + 60000;
+
+      const result = await t.run(async (ctx) => {
+        return await getScheduledActivityForResource(
+          ctx,
+          clubId,
+          scheduledTime,
+          ACTIVITY_TYPES.CLUB_UPDATED,
+        );
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null when type doesn't match", async () => {
+      const userId = await userHelpers.insertUser();
+      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const scheduledTime = Date.now() + 60000;
+
+      const activity = createTestActivity(clubId, userId, {
+        scheduledAt: scheduledTime,
+        type: ACTIVITY_TYPES.CLUB_CREATED,
+      });
+
+      await activityHelpers.insertActivity(activity);
+
+      const result = await t.run(async (ctx) => {
+        return await getScheduledActivityForResource(
+          ctx,
+          clubId,
+          scheduledTime,
+          ACTIVITY_TYPES.CLUB_UPDATED, // Different type
+        );
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("only returns activity for specified resource", async () => {
+      const userId = await userHelpers.insertUser();
+      const clubId1 = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId2 = await clubHelpers.insertClub(createTestClub(userId, { name: "Club 2" }));
+      const scheduledTime = Date.now() + 60000;
+
+      const activity1 = createTestActivity(clubId1, userId, {
+        scheduledAt: scheduledTime,
+        type: ACTIVITY_TYPES.CLUB_UPDATED,
+      });
+      const activity2 = createTestActivity(clubId2, userId, {
+        scheduledAt: scheduledTime,
+        type: ACTIVITY_TYPES.CLUB_UPDATED,
+      });
+
+      await activityHelpers.insertActivity(activity1);
+      await activityHelpers.insertActivity(activity2);
+
+      const result = await t.run(async (ctx) => {
+        return await getScheduledActivityForResource(
+          ctx,
+          clubId1,
+          scheduledTime,
+          ACTIVITY_TYPES.CLUB_UPDATED,
+        );
+      });
+
+      expect(result).not.toBeNull();
+      expect(result!.resourceId).toBe(clubId1);
     });
   });
 });

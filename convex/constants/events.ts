@@ -1,9 +1,3 @@
-export const EVENT_RECURRENCE = {
-  DAILY: "daily",
-  WEEKLY: "weekly",
-  MONTHLY: "monthly",
-} as const;
-
 export const EVENT_TYPE = {
   SOCIAL: "social",
   TRAINING: "training",
@@ -59,12 +53,9 @@ export const MAX_WAITLIST = 50;
 export const MIN_GRACE_TIME_HOURS = 1;
 export const MAX_GRACE_TIME_HOURS = 168; // 1 week
 export const MAX_EVENT_DURATION_HOURS = 24;
-export const MAX_END_DATE_MONTHS = 12;
+export const MAX_EVENT_SERIES_DURATION_MONTHS = 6;
 export const MAX_EVENT_START_DATE_DAYS_FROM_NOW = 30;
-export const MAX_GENERATED_EVENTS_FOR_RECURRENCE = {
-  [EVENT_RECURRENCE.DAILY]: 7,
-  [EVENT_RECURRENCE.WEEKLY]: 4,
-  [EVENT_RECURRENCE.MONTHLY]: 2,
-};
+export const MAX_EVENT_GENERATION_DAYS = 14;
+export const MAX_EVENT_GENERATION_DATE_RANGE_DAYS = 30;
 
 export const TIME_FORMAT_REGEX = /^([0-1][0-9]|2[0-3]):(00|15|30|45)$/;

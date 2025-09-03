@@ -9,6 +9,10 @@ export const resourceIdSchema = z.union([
   zid("clubMemberships"),
   zid("users"),
   zid("userProfiles"),
+  zid("events"),
+  zid("eventSeries"),
+  zid("eventParticipants"),
+  zid("_scheduled_functions"),
 ]);
 
 export type ResourceId = z.infer<typeof resourceIdSchema>;
@@ -24,17 +28,26 @@ export const activitySchema = z.object({
   resourceId: resourceIdSchema,
   relatedId: resourceIdSchema.optional(),
   type: z.enum(activityTypes as [string, ...string[]]),
-  createdBy: zid("users"),
+  createdBy: zid("users").optional(),
   createdAt: z.number(),
+  scheduledAt: z.number().optional(),
+  date: z.number(),
   metadata: activityMetadataSchema.optional(),
+});
+
+export const activityInputSchema = activitySchema.omit({
+  createdAt: true,
+  date: true,
 });
 
 export type Activity = DocumentByName<DataModel, "activities">;
 export type ActivityMetadata = z.infer<typeof activityMetadataSchema>;
+export type ActivityCreateInput = z.infer<typeof activityInputSchema>;
 
 export const activityTable = defineTable(zodToConvex(activitySchema))
   .index("resourceType", ["resourceId", "type"])
-  .index("resourceCreatedAt", ["resourceId", "createdAt"])
+  .index("resourceDate", ["resourceId", "date"])
+  .index("resourceTypeScheduledAt", ["resourceId", "type", "scheduledAt"])
   .index("createdBy", ["createdBy"])
   .index("relatedId", ["relatedId"]);
 

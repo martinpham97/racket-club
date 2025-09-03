@@ -4,14 +4,14 @@ import { EVENT_STATUS } from "@/convex/constants/events";
 import { filter } from "convex-helpers/server/filter";
 import { PaginationOptions, PaginationResult } from "convex/server";
 import { nanoid } from "nanoid";
-import { createEventFilter } from "./filters";
+import { createEventFilter } from "./helpers/filters";
 import {
   Event,
   EventCreateInput,
   eventCreateInputSchema,
-  EventDetails,
   EventFilters,
   EventParticipant,
+  EventParticipantDetails,
   EventSeries,
   EventSeriesCreateInput,
 } from "./schemas";
@@ -79,7 +79,7 @@ export const listParticipatingEvents = async (
   userId: Id<"users">,
   filters: ListEventsFilters,
   pagination: PaginationOptions,
-): Promise<PaginationResult<EventDetails>> => {
+): Promise<PaginationResult<EventParticipantDetails>> => {
   const userParticipations = await ctx.db
     .query("eventParticipants")
     .withIndex("userDate", (q) =>
@@ -93,7 +93,7 @@ export const listParticipatingEvents = async (
         return event ? { ...event, participation } : null;
       }),
     )
-  ).filter(Boolean) as EventDetails[];
+  ).filter(Boolean) as EventParticipantDetails[];
   return { ...userParticipations, page: eventsWithParticipation };
 };
 
@@ -152,7 +152,6 @@ export const getEventAtDate = async (
 /**
  * Searches events with optimized filtering and pagination
  * @param ctx - Query context for database operations
- * @param query - Optional text search query for event name/description
  * @param filters - Event filters (date range, clubs, skill level, location)
  * @param userMemberClubIds - Club IDs where user has membership access
  * @param pagination - Pagination options for result set
@@ -160,7 +159,6 @@ export const getEventAtDate = async (
  */
 export const searchEvents = async (
   ctx: QueryCtx,
-  query: string | undefined,
   filters: EventFilters,
   userMemberClubIds: Id<"clubs">[],
   pagination: PaginationOptions,
@@ -170,7 +168,7 @@ export const searchEvents = async (
       .query("events")
       .withIndex("date", (q) => q.gte("date", filters.fromDate).lte("date", filters.toDate))
       .order("asc"),
-    createEventFilter(query, filters, userMemberClubIds),
+    createEventFilter(filters, userMemberClubIds),
   ).paginate(pagination);
 };
 

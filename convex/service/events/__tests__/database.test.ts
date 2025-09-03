@@ -48,6 +48,8 @@ describe("Events Database Service", () => {
       expect(series!.name).toBe(input.name);
       expect(series!.clubId).toBe(clubId);
       expect(series!.createdBy).toBe(userId);
+      expect(series!.createdAt).toBeDefined();
+      expect(series!.modifiedAt).toBeDefined();
     });
   });
 
@@ -86,6 +88,8 @@ describe("Events Database Service", () => {
       expect(event!.date).toBe(FIXED_DATE);
       expect(event!.eventSeriesId).toBe(seriesId);
       expect(event!.status).toBe(EVENT_STATUS.NOT_STARTED);
+      expect(event!.createdAt).toBeDefined();
+      expect(event!.modifiedAt).toBeDefined();
     });
   });
 
@@ -273,8 +277,7 @@ describe("Events Database Service", () => {
       const result = await t.run(async (ctx) => {
         return await searchEvents(
           ctx,
-          "tennis",
-          { fromDate: FIXED_DATE - 86400000, toDate: FIXED_DATE + 86400000 },
+          { fromDate: FIXED_DATE - 86400000, toDate: FIXED_DATE + 86400000, query: "tennis" },
           [],
           { cursor: null, numItems: 10 },
         );

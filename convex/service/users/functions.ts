@@ -5,7 +5,7 @@ import {
 } from "@/convex/constants/errors";
 import {
   createActivity as dtoCreateActivity,
-  listActivitiesForUser as dtoListActivityForUser,
+  listActivitiesForRelatedResource as dtoListActivityForUser,
 } from "@/convex/service/activities/database";
 import {
   authenticatedMutationWithRLS,

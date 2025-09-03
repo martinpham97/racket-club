@@ -1,7 +1,8 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
-import { PaginationOptions, PaginationResult, WithoutSystemFields } from "convex/server";
-import { Activity, ResourceId } from "./schemas";
+import { ActivityType } from "@/convex/constants/activities";
+import { PaginationOptions, PaginationResult } from "convex/server";
+import { Activity, ActivityCreateInput, ResourceId } from "./schemas";
 
 /**
  * Gets an activity by its ID.
@@ -30,41 +31,68 @@ export const listActivitiesForResource = async (
 ): Promise<PaginationResult<Activity>> => {
   return await ctx.db
     .query("activities")
-    .withIndex("resourceCreatedAt", (q) => q.eq("resourceId", resourceId))
+    .withIndex("resourceDate", (q) => q.eq("resourceId", resourceId))
     .order("desc")
     .paginate(paginationOpts);
 };
 
 /**
- * Lists activities for a user with pagination.
+ * Lists activities for a related resource with pagination.
  * @param ctx Query context
- * @param userId User ID to get activities for
+ * @param relatedId Related resource ID to get activities for
  * @param paginationOpts Pagination options
  * @returns Paginated result of user activities
  */
-export const listActivitiesForUser = async (
+export const listActivitiesForRelatedResource = async (
   ctx: QueryCtx,
-  userId: Id<"users">,
+  relatedId: ResourceId,
   paginationOpts: PaginationOptions,
 ): Promise<PaginationResult<Activity>> => {
   return await ctx.db
     .query("activities")
-    .withIndex("relatedId", (q) => q.eq("relatedId", userId))
+    .withIndex("relatedId", (q) => q.eq("relatedId", relatedId))
     .order("desc")
     .paginate(paginationOpts);
+};
+
+/**
+ * Gets a scheduled activity for a resource at a specific time and type.
+ * @param ctx Query context
+ * @param resourceId Resource ID to get scheduled activity for
+ * @param scheduledAt Timestamp when activity is scheduled
+ * @param type Activity type to find
+ * @returns Single scheduled activity matching the criteria, or null if not found
+ */
+export const getScheduledActivityForResource = async (
+  ctx: QueryCtx,
+  resourceId: ResourceId,
+  scheduledAt: number,
+  type: ActivityType,
+): Promise<Activity | null> => {
+  return await ctx.db
+    .query("activities")
+    .withIndex("resourceTypeScheduledAt", (q) =>
+      q.eq("resourceId", resourceId).eq("type", type).eq("scheduledAt", scheduledAt),
+    )
+    .first();
 };
 
 /**
  * Creates a new activity.
  * @param ctx Mutation context
- * @param activity Activity creation data
+ * @param input Activity creation data
  * @returns ID of the created activity
  */
 export const createActivity = async (
   ctx: MutationCtx,
-  activity: WithoutSystemFields<Activity>,
+  input: ActivityCreateInput,
 ): Promise<Id<"activities">> => {
-  return await ctx.db.insert("activities", activity);
+  const createdAt = Date.now();
+  return await ctx.db.insert("activities", {
+    ...input,
+    createdAt,
+    date: input.scheduledAt ?? createdAt,
+  });
 };
 
 /**

@@ -6,7 +6,7 @@ import {
   matchesLevelRange,
   matchesLocationFilter,
   matchesTextSearch,
-} from "@/convex/service/events/filters";
+} from "@/convex/service/events/helpers/filters";
 import { createTestEventRecord } from "@/test-utils/samples/events";
 import { genId } from "@/test-utils/samples/id";
 import { describe, expect, it } from "vitest";
@@ -189,11 +189,11 @@ describe("Event Filters", () => {
         clubIds: [baseEvent.clubId],
         levelRange: { min: 3, max: 7 },
         placeId: "place123",
+        query: "test",
       };
       const userMemberClubIds = [baseEvent.clubId];
-      const query = "test";
 
-      const filterFn = createEventFilter(query, filters, userMemberClubIds);
+      const filterFn = createEventFilter(filters, userMemberClubIds);
       expect(filterFn(baseEvent)).toBe(true);
     });
 
@@ -204,29 +204,27 @@ describe("Event Filters", () => {
         clubIds: [baseEvent.clubId],
         levelRange: { min: 3, max: 7 },
         placeId: "place123",
+        query: "test",
       };
       const userMemberClubIds = [baseEvent.clubId];
 
       // Test each filter failure
-      const filterFn1 = createEventFilter("nonexistent", filters, userMemberClubIds);
+      const filterFn1 = createEventFilter({ ...filters, query: "nonexistent" }, userMemberClubIds);
       expect(filterFn1(baseEvent)).toBe(false); // text search fails
 
       const filterFn2 = createEventFilter(
-        "test",
         { ...filters, clubIds: [OTHER_CLUB_ID] },
         userMemberClubIds,
       );
       expect(filterFn2(baseEvent)).toBe(false); // club filter fails
 
       const filterFn3 = createEventFilter(
-        "test",
         { ...filters, levelRange: { min: 1, max: 2 } },
         userMemberClubIds,
       );
       expect(filterFn3(baseEvent)).toBe(false); // level range fails
 
       const filterFn4 = createEventFilter(
-        "test",
         { ...filters, placeId: "other-place" },
         userMemberClubIds,
       );
@@ -240,10 +238,10 @@ describe("Event Filters", () => {
         toDate: FIXED_DATE + 86400000,
       };
 
-      const filterFn1 = createEventFilter("test", filters, [baseEvent.clubId]);
+      const filterFn1 = createEventFilter(filters, [baseEvent.clubId]);
       expect(filterFn1(membersEvent)).toBe(true); // user is member
 
-      const filterFn2 = createEventFilter("test", filters, []);
+      const filterFn2 = createEventFilter(filters, []);
       expect(filterFn2(membersEvent)).toBe(false); // user is not member
     });
 
@@ -253,7 +251,7 @@ describe("Event Filters", () => {
         toDate: FIXED_DATE + 86400000,
       };
 
-      const filterFn = createEventFilter(undefined, filters, []);
+      const filterFn = createEventFilter(filters, []);
       expect(filterFn(baseEvent)).toBe(true); // public event with no additional filters
     });
   });

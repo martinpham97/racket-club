@@ -1,14 +1,12 @@
 import { QueryCtx } from "@/convex/_generated/server";
 import {
+  AUTH_ACCESS_DENIED_ERROR,
   END_TIME_AFTER_START_ERROR,
   EVENT_CANNOT_JOIN_OR_LEAVE_DUE_TO_STATUS_ERROR,
   EVENT_DATE_FUTURE_ERROR,
+  EVENT_DATE_RANGE_INVALID_ERROR,
   EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
-  EVENT_DAY_OF_MONTH_REQUIRED_ERROR,
-  EVENT_DAY_OF_WEEK_REQUIRED_ERROR,
   EVENT_END_DATE_AFTER_START_ERROR,
-  EVENT_INVALID_RECURRENCE_ERROR,
-  EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
   EVENT_START_DATE_FUTURE_ERROR,
   EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
   EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR,
@@ -24,19 +22,22 @@ import {
   TIMESLOT_TIME_RANGE_NOT_MATCH_SCHEDULE_ERROR,
 } from "@/convex/constants/errors";
 import {
-  EVENT_RECURRENCE,
   EVENT_STATUS,
   EVENT_VISIBILITY,
   FEE_TYPE,
+  MAX_EVENT_SERIES_DURATION_MONTHS,
   MAX_EVENT_START_DATE_DAYS_FROM_NOW,
   MAX_PARTICIPANTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import { EventCreateInput, EventRecurrence } from "@/convex/service/events/schemas";
+import * as clubDatabase from "@/convex/service/clubs/database";
+import { EventCreateInput } from "@/convex/service/events/schemas";
 import {
+  isEventDateRangeValid,
+  validateEventAccess,
   validateEventDate,
+  validateEventDateRange,
   validateEventForCreate,
-  validateEventSchedule,
   validateEventSeriesForCreate,
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
@@ -58,11 +59,40 @@ import { genId } from "@/test-utils/samples/id";
 import { createTestUserRecord } from "@/test-utils/samples/users";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/convex/service/clubs/database");
+const mockGetClubMembershipForUser = vi.mocked(clubDatabase.getClubMembershipForUser);
+
 // Date calculation constants
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
 const THIRTY_DAYS_MS = 30 * ONE_DAY_MS;
 const SIXTY_DAYS_MS = 60 * ONE_DAY_MS;
+
+describe("isEventDateRangeValid", () => {
+  it("should return true for date range within 30 days", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate + 29 * ONE_DAY_MS;
+    expect(isEventDateRangeValid({ fromDate, toDate })).toBe(true);
+  });
+
+  it("should return true for date range exactly 30 days", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate + THIRTY_DAYS_MS;
+    expect(isEventDateRangeValid({ fromDate, toDate })).toBe(true);
+  });
+
+  it("should return false for date range exceeding 30 days", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate + 31 * ONE_DAY_MS;
+    expect(isEventDateRangeValid({ fromDate, toDate })).toBe(false);
+  });
+
+  it("should return false for negative date range", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate - ONE_DAY_MS;
+    expect(isEventDateRangeValid({ fromDate, toDate })).toBe(false);
+  });
+});
 
 describe("validateEventTime", () => {
   it("should pass when start time is before end time", () => {
@@ -114,32 +144,12 @@ describe("validateRecurringSchedule", () => {
     vi.useRealTimers();
   });
 
-  it("should throw when startDate is undefined", () => {
-    const schedule = {
-      startDate: undefined,
-      endDate: Date.now() + THIRTY_DAYS_MS,
-    };
-
-    expect(() => validateRecurringSchedule(schedule)).toThrow(
-      EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
-    );
-  });
-
-  it("should throw when endDate is undefined", () => {
-    const schedule = {
-      startDate: Date.now() + ONE_DAY_MS,
-      endDate: undefined,
-    };
-
-    expect(() => validateRecurringSchedule(schedule)).toThrow(
-      EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
-    );
-  });
-
   it("should throw when startDate is in the past", () => {
     const schedule = {
       startDate: Date.now() - ONE_DAY_MS,
       endDate: Date.now() + THIRTY_DAYS_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
     };
 
     expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_START_DATE_FUTURE_ERROR);
@@ -149,6 +159,8 @@ describe("validateRecurringSchedule", () => {
     const schedule = {
       startDate: Date.now() + THIRTY_DAYS_MS,
       endDate: Date.now() + SEVEN_DAYS_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
     };
 
     expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_END_DATE_AFTER_START_ERROR);
@@ -158,6 +170,8 @@ describe("validateRecurringSchedule", () => {
     const schedule = {
       startDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * ONE_DAY_MS,
       endDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 30) * ONE_DAY_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
     };
 
     expect(() => validateRecurringSchedule(schedule)).toThrow(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
@@ -167,6 +181,30 @@ describe("validateRecurringSchedule", () => {
     const schedule = {
       startDate: Date.now() + ONE_DAY_MS,
       endDate: Date.now() + THIRTY_DAYS_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).not.toThrow();
+  });
+
+  it("should throw when event series duration exceeds maximum months", () => {
+    const schedule = {
+      startDate: Date.now() + ONE_DAY_MS,
+      endDate: Date.now() + (MAX_EVENT_SERIES_DURATION_MONTHS + 1) * 30 * ONE_DAY_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
+    };
+
+    expect(() => validateRecurringSchedule(schedule)).toThrow();
+  });
+
+  it("should pass when event series duration is within maximum months", () => {
+    const schedule = {
+      startDate: Date.now() + ONE_DAY_MS,
+      endDate: Date.now() + (MAX_EVENT_SERIES_DURATION_MONTHS - 1) * 30 * ONE_DAY_MS,
+      daysOfWeek: [1, 2, 3],
+      interval: 1,
     };
 
     expect(() => validateRecurringSchedule(schedule)).not.toThrow();
@@ -198,214 +236,6 @@ describe("validateEventVisibility", () => {
     const privateClub = createTestClubRecord(genId<"users">("users"), { isPublic: false });
 
     expect(() => validateEventVisibility(privateClub, EVENT_VISIBILITY.MEMBERS_ONLY)).not.toThrow();
-  });
-});
-
-describe("validateEventSchedule", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  describe("DAILY events", () => {
-    it("should throw when start date is undefined", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: undefined,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
-      );
-    });
-
-    it("should throw when end date is undefined", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: undefined,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        EVENT_RECURRING_START_END_DATE_REQUIRED_ERROR,
-      );
-    });
-
-    it("should throw when start date is in the past", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() - ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        EVENT_START_DATE_FUTURE_ERROR,
-      );
-    });
-
-    it("should throw when end date is before start date", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + THIRTY_DAYS_MS,
-        endDate: Date.now() + SEVEN_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        EVENT_END_DATE_AFTER_START_ERROR,
-      );
-    });
-
-    it("should throw when start date is too far in the future", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 1) * ONE_DAY_MS,
-        endDate: Date.now() + (MAX_EVENT_START_DATE_DAYS_FROM_NOW + 30) * ONE_DAY_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow(
-        EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
-      );
-    });
-
-    it("should pass when dates are valid", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).not.toThrow();
-    });
-
-    it("should throw when dayOfWeek parameter is provided", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfWeek: 1,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow();
-    });
-
-    it("should throw when dayOfMonth parameter is provided", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfMonth: 15,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.DAILY)).toThrow();
-    });
-  });
-
-  describe("WEEKLY events", () => {
-    it("should throw when dayOfWeek is undefined", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.WEEKLY)).toThrow(
-        EVENT_DAY_OF_WEEK_REQUIRED_ERROR,
-      );
-    });
-
-    it("should pass when dayOfWeek is provided and dates are valid", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfWeek: 1,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.WEEKLY)).not.toThrow();
-    });
-
-    it("should throw when dayOfMonth parameter is provided", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfWeek: 1,
-        dayOfMonth: 15,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.WEEKLY)).toThrow();
-    });
-  });
-
-  describe("MONTHLY events", () => {
-    it("should throw when dayOfMonth is undefined", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.MONTHLY)).toThrow(
-        EVENT_DAY_OF_MONTH_REQUIRED_ERROR,
-      );
-    });
-
-    it("should pass when dayOfMonth is provided and dates are valid", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfMonth: 15,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.MONTHLY)).not.toThrow();
-    });
-
-    it("should throw when dayOfWeek parameter is provided", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-        dayOfMonth: 15,
-        dayOfWeek: 1,
-      };
-
-      expect(() => validateEventSchedule(schedule, EVENT_RECURRENCE.MONTHLY)).toThrow();
-    });
-  });
-
-  describe("invalid recurrence", () => {
-    it("should throw for invalid recurrence type", () => {
-      const schedule = {
-        startTime: "18:00",
-        endTime: "20:00",
-        startDate: Date.now() + ONE_DAY_MS,
-        endDate: Date.now() + THIRTY_DAYS_MS,
-      };
-
-      expect(() => validateEventSchedule(schedule, "INVALID" as EventRecurrence)).toThrow(
-        EVENT_INVALID_RECURRENCE_ERROR,
-      );
-    });
   });
 });
 
@@ -849,12 +679,87 @@ describe("validateEventSeriesForUpdate", () => {
       schedule: {
         startDate: Date.now() + 2 * ONE_DAY_MS,
         endDate: Date.now() + SIXTY_DAYS_MS,
+        daysOfWeek: [1, 2, 3],
+        interval: 1,
       },
-      recurrence: EVENT_RECURRENCE.WEEKLY,
     };
 
     await expect(
       validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
     ).resolves.not.toThrow();
+  });
+});
+
+describe("validateEventDateRange", () => {
+  it("should pass when date range is valid", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate + 29 * ONE_DAY_MS;
+    expect(() => validateEventDateRange(fromDate, toDate)).not.toThrow();
+  });
+
+  it("should throw when date range exceeds maximum days", () => {
+    const fromDate = Date.now();
+    const toDate = fromDate + 31 * ONE_DAY_MS;
+    expect(() => validateEventDateRange(fromDate, toDate)).toThrow(EVENT_DATE_RANGE_INVALID_ERROR);
+  });
+});
+
+describe("validateEventAccess", () => {
+  let ctx: QueryCtx;
+  beforeEach(() => {
+    ctx = createMockCtx<QueryCtx>();
+    vi.clearAllMocks();
+  });
+
+  it("should pass for public events", async () => {
+    const event = createTestEventRecord(
+      genId<"eventSeries">("eventSeries"),
+      genId<"clubs">("clubs"),
+      genId<"users">("users"),
+      Date.now(),
+      { visibility: EVENT_VISIBILITY.PUBLIC },
+    );
+    const userId = genId<"users">("users");
+
+    await expect(validateEventAccess(ctx, event, userId)).resolves.not.toThrow();
+  });
+
+  it("should pass for members-only events when user is a member", async () => {
+    const clubId = genId<"clubs">("clubs");
+    const userId = genId<"users">("users");
+    const event = createTestEventRecord(
+      genId<"eventSeries">("eventSeries"),
+      clubId,
+      genId<"users">("users"),
+      Date.now(),
+      { visibility: EVENT_VISIBILITY.MEMBERS_ONLY, clubId },
+    );
+    const membership = createTestClubMembershipRecord(clubId, userId);
+
+    vi.mocked(ctx.db.get).mockResolvedValue(
+      createTestClubRecord(genId<"users">("users"), { _id: clubId }),
+    );
+    mockGetClubMembershipForUser.mockResolvedValue(membership);
+
+    await expect(validateEventAccess(ctx, event, userId)).resolves.not.toThrow();
+  });
+
+  it("should throw for members-only events when user is not a member", async () => {
+    const clubId = genId<"clubs">("clubs");
+    const userId = genId<"users">("users");
+    const event = createTestEventRecord(
+      genId<"eventSeries">("eventSeries"),
+      clubId,
+      genId<"users">("users"),
+      Date.now(),
+      { visibility: EVENT_VISIBILITY.MEMBERS_ONLY, clubId },
+    );
+
+    vi.mocked(ctx.db.get).mockResolvedValue(
+      createTestClubRecord(genId<"users">("users"), { _id: clubId }),
+    );
+    mockGetClubMembershipForUser.mockResolvedValue(null);
+
+    await expect(validateEventAccess(ctx, event, userId)).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
   });
 });

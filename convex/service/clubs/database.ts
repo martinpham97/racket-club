@@ -144,13 +144,13 @@ export const listAllClubMembers = async (
 
 /**
  * Gets a user's ban record for the given club if exists
- * @param ctx Mutation context
+ * @param ctx Query context
  * @param clubId Club ID
  * @param userId User ID
  * @returns Ban record if exists, else null
  */
 export const getClubBanRecordForUser = async (
-  ctx: MutationCtx,
+  ctx: QueryCtx,
   clubId: Id<"clubs">,
   userId: Id<"users">,
 ) => {
@@ -159,4 +159,21 @@ export const getClubBanRecordForUser = async (
     .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
     .filter((q) => q.eq(q.field("isActive"), true))
     .unique();
+};
+
+/**
+ * Gets all club IDs where the user is a member.
+ * @param ctx Query context
+ * @param userId User ID to get club memberships for
+ * @returns Array of club IDs the user is a member of
+ */
+export const listUserClubIds = async (
+  ctx: QueryCtx,
+  userId: Id<"users">,
+): Promise<Id<"clubs">[]> => {
+  const memberships = await ctx.db
+    .query("clubMemberships")
+    .withIndex("userId", (q) => q.eq("userId", userId))
+    .collect();
+  return memberships.map((m) => m.clubId);
 };

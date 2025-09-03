@@ -560,7 +560,6 @@ const createClubActivity = async (
     relatedId,
     type,
     createdBy: ctx.currentUser._id,
-    createdAt: Date.now(),
     metadata,
   });
 };
