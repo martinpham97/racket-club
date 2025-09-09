@@ -1,241 +1,247 @@
-import { Id } from "@/convex/_generated/dataModel";
-import { ACTIVITY_TYPES, ActivityType } from "@/convex/constants/activities";
-import { MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
+import { EVENT_STATUS, MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
 import schema from "@/convex/schema";
-import * as activitiesDatabase from "@/convex/service/activities/database";
 import * as timeUtils from "@/convex/service/utils/time";
-import { createTestActivityRecord } from "@/test-utils/samples/activities";
 import { ClubTestHelpers, createTestClub } from "@/test-utils/samples/clubs";
 import {
-  createTestEventRecord,
+  createTestEvent,
   createTestEventSeries,
-  createTestEventSeriesRecord,
   EventTestHelpers,
 } from "@/test-utils/samples/events";
-import { genId } from "@/test-utils/samples/id";
-import { createTestUserRecord, UserTestHelpers } from "@/test-utils/samples/users";
-import { convexTest } from "convex-test";
-import { addDays, subDays } from "date-fns";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SchedulerTestHelpers } from "@/test-utils/samples/scheduler";
+import { UserTestHelpers } from "@/test-utils/samples/users";
+
 import {
   activateEventSeries,
-  getOrCreateEventScheduledTransitionActivity,
+  getEventScheduleStatuses,
+  getEventSeriesDeactivationStatus,
   getOrScheduleEventStatusTransitions,
   scheduleEventSeriesDeactivation,
+  scheduleEventSeriesDeactivationAtEndDate,
+  scheduleEventStatusTransitions,
   scheduleNextEventGeneration,
-} from "../scheduling";
+} from "@/convex/service/events/helpers/scheduling";
+import { convexTest } from "@/convex/setup.testing";
+import { addDays, subDays } from "date-fns";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/convex/service/activities/database");
 vi.mock("@/convex/service/utils/time");
 
-const mockGetScheduledActivityForResource = vi.mocked(
-  activitiesDatabase.getScheduledActivityForResource,
-);
-const mockCreateActivity = vi.mocked(activitiesDatabase.createActivity);
 const mockGetStartOfDayInTimezone = vi.mocked(timeUtils.getStartOfDayInTimezone);
 const mockGetUtcTimestampForDate = vi.mocked(timeUtils.getUtcTimestampForDate);
 
 describe("Event Scheduling Helpers", () => {
-  const t = convexTest(schema);
-  const eventHelpers = new EventTestHelpers(t);
-  const userHelpers = new UserTestHelpers(t);
-  const clubHelpers = new ClubTestHelpers(t);
+  let t: ReturnType<typeof convexTest>;
+  let clubHelpers: ClubTestHelpers;
+  let userHelpers: UserTestHelpers;
+  let eventHelpers: EventTestHelpers;
+  let schedulerHelpers: SchedulerTestHelpers;
 
   beforeEach(() => {
+    t = convexTest(schema);
+    eventHelpers = new EventTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    userHelpers = new UserTestHelpers(t);
+    schedulerHelpers = new SchedulerTestHelpers(t);
     vi.clearAllMocks();
+    vi.useFakeTimers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait for all scheduled functions to complete
+    if (vi.isFakeTimers()) {
+      await vi.runAllTimersAsync();
+    }
     vi.useRealTimers();
   });
 
-  describe("getOrCreateEventScheduledTransitionActivity", () => {
-    it("should return existing activity ID when activity already exists", async () => {
-      const existingActivity = createTestActivityRecord();
-      mockGetScheduledActivityForResource.mockResolvedValue(existingActivity);
+  describe("scheduleEventSeriesDeactivation", () => {
+    it("should schedule deactivation when no existing schedule", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+      const scheduledAt = Date.now() + 86400000;
 
-      const result = await t.run(async (ctx) => {
-        return await getOrCreateEventScheduledTransitionActivity(
-          ctx,
-          ACTIVITY_TYPES.EVENT_IN_PROGRESS_SCHEDULED,
-          "event123" as Id<"events">,
-          Date.now(),
-        );
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivation(ctx, seriesId, scheduledAt);
       });
 
-      expect(result).toBe(existingActivity._id);
-      expect(mockCreateActivity).not.toHaveBeenCalled();
-    });
+      // Wait for any async operations to complete
+      await vi.runAllTimersAsync();
 
-    it("should create new activity for event series deactivation", async () => {
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      const newActivityId = genId<"activities">("activities");
-      mockCreateActivity.mockResolvedValue(newActivityId);
-
-      const result = await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
-        return await getOrCreateEventScheduledTransitionActivity(
-          ctx,
-          ACTIVITY_TYPES.EVENT_SERIES_DEACTIVATION_SCHEDULED,
-          "series123" as Id<"eventSeries">,
-          Date.now(),
-        );
-      });
-
-      expect(result).toBe(newActivityId);
-      expect(mockCreateActivity).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          type: ACTIVITY_TYPES.EVENT_SERIES_DEACTIVATION_SCHEDULED,
-          resourceId: "series123",
-          metadata: [{ fieldChanged: "isActive", newValue: "false" }],
-        }),
+      // Verify scheduled function was created by checking edges
+      const updatedSeries = await eventHelpers.getEventSeries(seriesId);
+      expect(updatedSeries?.onSeriesEndFunctionId).toBeDefined();
+      const scheduledFunction = await schedulerHelpers.getScheduledFunction(
+        updatedSeries!.onSeriesEndFunctionId!,
       );
+      expect(scheduledFunction).not.toBeNull();
+      expect(scheduledFunction!.scheduledTime).toBe(scheduledAt);
+      expect(scheduledFunction!.args).toEqual([{ eventSeriesId: seriesId }]);
+      expect(scheduledFunction!.name).toBe("service/events/functions:_deactivateEventSeries");
     });
 
-    it("should create new activity for event in progress", async () => {
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      const newActivityId = genId<"activities">("activities");
-      mockCreateActivity.mockResolvedValue(newActivityId);
+    it("should not schedule when existing schedule exists", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
 
-      const result = await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
-        return await getOrCreateEventScheduledTransitionActivity(
-          ctx,
-          ACTIVITY_TYPES.EVENT_IN_PROGRESS_SCHEDULED,
-          "event123" as Id<"events">,
-          Date.now(),
-        );
+      // First schedule
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivation(ctx, seriesId, Date.now());
       });
 
-      expect(result).toBe(newActivityId);
-      expect(mockCreateActivity).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          type: ACTIVITY_TYPES.EVENT_IN_PROGRESS_SCHEDULED,
-          resourceId: "event123",
-          metadata: [{ fieldChanged: "status", newValue: "in_progress" }],
-        }),
+      // Second attempt should not schedule
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivation(ctx, seriesId, Date.now());
+      });
+
+      // Verify only one scheduled function exists
+      const updatedSeries = await eventHelpers.getEventSeries(seriesId);
+      expect(updatedSeries?.onSeriesEndFunctionId).toBeDefined();
+    });
+  });
+
+  describe("scheduleEventStatusTransitions", () => {
+    it("should schedule both start and completion transitions", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(seriesId, clubId, userId, Date.now()),
       );
-    });
+      const eventId = event._id;
+      const startTime = Date.now() + 1000;
+      const endTime = Date.now() + 2000;
 
-    it("should create new activity for event completed", async () => {
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      const newActivityId = genId<"activities">("activities");
-      mockCreateActivity.mockResolvedValue(newActivityId);
-
-      const result = await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
-        return await getOrCreateEventScheduledTransitionActivity(
-          ctx,
-          ACTIVITY_TYPES.EVENT_COMPLETED_SCHEDULED,
-          "event123" as Id<"events">,
-          Date.now(),
-        );
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventStatusTransitions(ctx, eventId, startTime, endTime);
       });
 
-      expect(result).toBe(newActivityId);
-      expect(mockCreateActivity).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          type: ACTIVITY_TYPES.EVENT_COMPLETED_SCHEDULED,
-          resourceId: "event123",
-          metadata: [{ fieldChanged: "status", newValue: "completed" }],
-        }),
+      // Wait for any async operations to complete
+      await vi.runAllTimersAsync();
+
+      // Verify scheduled functions were created by checking edges
+      const updatedEvent = await eventHelpers.getEvent(eventId);
+      expect(updatedEvent?.onEventStartFunctionId).toBeDefined();
+      expect(updatedEvent?.onEventEndFunctionId).toBeDefined();
+      const startFunction = await schedulerHelpers.getScheduledFunction(
+        updatedEvent!.onEventStartFunctionId!,
       );
-    });
-
-    it("should return null for unknown activity type", async () => {
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-
-      const result = await t.run(async (ctx) => {
-        return await getOrCreateEventScheduledTransitionActivity(
-          ctx,
-          "UNKNOWN_TYPE" as ActivityType,
-          "event123" as Id<"events">,
-          Date.now(),
-        );
-      });
-
-      expect(result).toBeNull();
+      const endFunction = await schedulerHelpers.getScheduledFunction(
+        updatedEvent!.onEventEndFunctionId!,
+      );
+      expect(startFunction).not.toBeNull();
+      expect(endFunction).not.toBeNull();
+      expect(startFunction!.scheduledTime).toBe(startTime);
+      expect(startFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.IN_PROGRESS }]);
+      expect(startFunction!.name).toBe("service/events/functions:_updateEventStatus");
+      expect(endFunction!.scheduledTime).toBe(endTime);
+      expect(endFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.COMPLETED }]);
+      expect(endFunction!.name).toBe("service/events/functions:_updateEventStatus");
     });
   });
 
   describe("getOrScheduleEventStatusTransitions", () => {
     it("should schedule both start and end transitions", async () => {
-      const user = createTestUserRecord();
-      const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id);
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
       const eventDate = Date.now();
       const startTime = eventDate + 1000;
       const endTime = eventDate + 2000;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(seriesId, clubId, userId, eventDate),
+      );
+      const eventId = event._id;
 
       mockGetUtcTimestampForDate.mockReturnValueOnce(startTime).mockReturnValueOnce(endTime);
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      mockCreateActivity.mockResolvedValue("activity123" as Id<"activities">);
 
-      await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
-        await getOrScheduleEventStatusTransitions(
-          ctx,
-          series,
-          "event123" as Id<"events">,
-          eventDate,
-        );
+      await t.runWithCtx(async (ctx) => {
+        await getOrScheduleEventStatusTransitions(ctx, series, eventId, eventDate);
       });
 
+      // Wait for any async operations to complete
+      await vi.runAllTimersAsync();
+
+      // Verify scheduled functions were created
+      const updatedEvent = await eventHelpers.getEvent(eventId);
+      expect(updatedEvent?.onEventStartFunctionId).toBeDefined();
+      expect(updatedEvent?.onEventEndFunctionId).toBeDefined();
+      const startFunction = await schedulerHelpers.getScheduledFunction(
+        updatedEvent!.onEventStartFunctionId!,
+      );
+      const endFunction = await schedulerHelpers.getScheduledFunction(
+        updatedEvent!.onEventEndFunctionId!,
+      );
+      expect(startFunction).not.toBeNull();
+      expect(endFunction).not.toBeNull();
+      expect(startFunction!.scheduledTime).toBe(startTime);
+      expect(startFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.IN_PROGRESS }]);
+      expect(startFunction!.name).toBe("service/events/functions:_updateEventStatus");
+      expect(endFunction!.scheduledTime).toBe(endTime);
+      expect(endFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.COMPLETED }]);
+      expect(endFunction!.name).toBe("service/events/functions:_updateEventStatus");
+
       expect(mockGetUtcTimestampForDate).toHaveBeenCalledTimes(2);
-      expect(mockCreateActivity).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe("scheduleEventSeriesDeactivation", () => {
+  describe("scheduleEventSeriesDeactivationAtEndDate", () => {
     it("should schedule deactivation at series end date", async () => {
-      const user = createTestUserRecord();
-      const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id);
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
       const endDate = new Date("2024-12-31");
 
       mockGetStartOfDayInTimezone.mockReturnValue(endDate);
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      mockCreateActivity.mockResolvedValue("activity123" as Id<"activities">);
 
-      await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
-        await scheduleEventSeriesDeactivation(ctx, "series123" as Id<"eventSeries">, series);
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivationAtEndDate(ctx, seriesId, series);
       });
+
+      // Wait for any async operations to complete
+      await vi.runAllTimersAsync();
+
+      // Verify scheduled function was created
+      const updatedSeries = await eventHelpers.getEventSeries(seriesId);
+      expect(updatedSeries?.onSeriesEndFunctionId).toBeDefined();
+      const scheduledFunction = await schedulerHelpers.getScheduledFunction(
+        updatedSeries!.onSeriesEndFunctionId!,
+      );
+      expect(scheduledFunction).not.toBeNull();
+      expect(scheduledFunction!.scheduledTime).toBe(endDate.getTime());
+      expect(scheduledFunction!.args).toEqual([{ eventSeriesId: seriesId }]);
+      expect(scheduledFunction!.name).toBe("service/events/functions:_deactivateEventSeries");
 
       expect(mockGetStartOfDayInTimezone).toHaveBeenCalledWith(
         series.schedule.endDate,
         series.location.timezone,
       );
-      expect(mockCreateActivity).toHaveBeenCalled();
     });
   });
 
   describe("activateEventSeries", () => {
     it("should activate event series by scheduling deactivation and generating events", async () => {
       const now = Date.now();
-      const userId = await userHelpers.insertUser();
-      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
       const seriesInput = createTestEventSeries(clubId, userId, {
         schedule: {
           startDate: now,
@@ -244,23 +250,29 @@ describe("Event Scheduling Helpers", () => {
           interval: 1,
         },
       });
-      const seriesId = await eventHelpers.insertEventSeries(seriesInput);
+      const insertedSeries = await eventHelpers.insertEventSeries(seriesInput);
+      const seriesId = insertedSeries._id;
       const series = await eventHelpers.getEventSeries(seriesId);
 
       mockGetStartOfDayInTimezone.mockReturnValue(new Date(seriesInput.schedule.endDate));
-      mockGetScheduledActivityForResource.mockResolvedValue(null);
-      mockCreateActivity.mockResolvedValue("activity123" as Id<"activities">);
 
-      await t.run(async (ctx) => {
+      await t.runWithCtx(async (ctx) => {
         const mockRunMutation = vi.fn().mockResolvedValue({
           events: [
-            createTestEventRecord(seriesId, clubId, userId, now),
-            createTestEventRecord(seriesId, clubId, userId, addDays(now, 7).getTime()),
+            createTestEvent(seriesId, clubId, userId, now),
+            createTestEvent(seriesId, clubId, userId, addDays(now, 7).getTime()),
           ],
         });
         ctx.runMutation = mockRunMutation as typeof ctx.runMutation;
 
         await activateEventSeries(ctx, series!);
+
+        // Verify scheduled function was created
+        const seriesWithEdges = await ctx.table("eventSeries").getX(seriesId);
+        const scheduledFunction = await seriesWithEdges.edge("onSeriesEndFunction");
+        expect(scheduledFunction).not.toBeNull();
+        expect(scheduledFunction!.args).toEqual([{ eventSeriesId: seriesId }]);
+        expect(scheduledFunction!.name).toBe("service/events/functions:_deactivateEventSeries");
 
         const actualCall = mockRunMutation.mock.calls[0][1];
         expect(actualCall.eventSeriesId).toBe(seriesId);
@@ -276,17 +288,24 @@ describe("Event Scheduling Helpers", () => {
 
   describe("scheduleNextEventGeneration", () => {
     it("should return early when no dates provided", async () => {
-      await t.run(async (ctx) => {
-        await scheduleNextEventGeneration(ctx, "series123" as Id<"eventSeries">, []);
-      });
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
 
-      // No scheduler calls should be made
+      await t.runWithCtx(async (ctx) => {
+        await scheduleNextEventGeneration(ctx, seriesId, []);
+      });
     });
 
     it("should schedule next generation when conditions are met", async () => {
       const now = Date.now();
-      const userId = await userHelpers.insertUser();
-      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
       const seriesInput = createTestEventSeries(clubId, userId, {
         schedule: {
           startDate: now,
@@ -295,55 +314,220 @@ describe("Event Scheduling Helpers", () => {
           interval: 1,
         },
       });
-      const seriesId = await eventHelpers.insertEventSeries(seriesInput);
+      const insertedSeries = await eventHelpers.insertEventSeries(seriesInput);
+      const seriesId = insertedSeries._id;
 
       const currentDates = [now, addDays(now, 7).getTime()];
-      const lastDate = addDays(now, 7).getTime();
-      const scheduleDate = subDays(lastDate, MAX_EVENT_GENERATION_DAYS).getTime();
+      const scheduleDate = subDays(addDays(now, 7).getTime(), MAX_EVENT_GENERATION_DAYS).getTime();
 
-      // Mock future date check
       vi.useFakeTimers();
       vi.setSystemTime(scheduleDate - 1000);
 
-      await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn().mockResolvedValue("scheduledFunction123" as Id<"_scheduled_functions">),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
-
+      await t.runWithCtx(async (ctx) => {
         await scheduleNextEventGeneration(ctx, seriesId, currentDates);
-
-        expect(mockScheduler.runAt).toHaveBeenCalledWith(
-          scheduleDate,
-          expect.any(Object),
-          expect.objectContaining({
-            eventSeriesId: seriesId,
-            range: expect.objectContaining({
-              startDate: addDays(lastDate, 1).getTime(),
-              endDate: seriesInput.schedule.endDate,
-            }),
-          }),
-        );
       });
+
+      // Wait for any async operations to complete
+      await vi.runAllTimersAsync();
+
+      // Verify scheduled function was created in database
+      const generationFunctions = await schedulerHelpers.getScheduledFunctionsByName(
+        "service/events/functions:_generateEventsForSeries",
+      );
+      const generationFunction = generationFunctions[0];
+
+      expect(generationFunction).toBeDefined();
+      expect(generationFunction!.scheduledTime).toBe(scheduleDate);
+      expect(generationFunction!.args).toEqual([
+        {
+          eventSeriesId: seriesId,
+          range: {
+            startDate: addDays(addDays(now, 7).getTime(), 1).getTime(),
+            endDate: seriesInput.schedule.endDate,
+          },
+        },
+      ]);
     });
 
     it("should not schedule when schedule date is in the past", async () => {
-      const userId = await userHelpers.insertUser();
-      const clubId = await clubHelpers.insertClub(createTestClub(userId));
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
       const seriesInput = createTestEventSeries(clubId, userId);
-      const seriesId = await eventHelpers.insertEventSeries(seriesInput);
+      const insertedSeries = await eventHelpers.insertEventSeries(seriesInput);
+      const seriesId = insertedSeries._id;
       const currentDates = [Date.now() - 1000];
 
-      await t.run(async (ctx) => {
-        const mockScheduler = {
-          runAt: vi.fn(),
-        };
-        ctx.scheduler = mockScheduler as unknown as typeof ctx.scheduler;
+      const initialFunctions = await schedulerHelpers.getAllScheduledFunctions();
 
+      await t.runWithCtx(async (ctx) => {
         await scheduleNextEventGeneration(ctx, seriesId, currentDates);
-
-        expect(mockScheduler.runAt).not.toHaveBeenCalled();
       });
+
+      const finalFunctions = await schedulerHelpers.getAllScheduledFunctions();
+      expect(finalFunctions.length).toBe(initialFunctions.length);
+    });
+  });
+
+  describe("getEventSeriesDeactivationStatus", () => {
+    it("should return schedule status when exists", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+
+      // Schedule deactivation first
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivation(ctx, seriesId, Date.now());
+      });
+
+      const status = await t.runWithCtx(async (ctx) => {
+        return await getEventSeriesDeactivationStatus(ctx, seriesId);
+      });
+
+      expect(status).toBeDefined();
+      expect(status).toBe("pending");
+    });
+
+    it("should return null when no schedule exists", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+
+      const status = await t.runWithCtx(async (ctx) => {
+        return await getEventSeriesDeactivationStatus(ctx, seriesId);
+      });
+
+      expect(status).toBeNull();
+    });
+  });
+
+  describe("getEventScheduleStatuses", () => {
+    it("should return schedule statuses when they exist", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(seriesId, clubId, userId, Date.now()),
+      );
+      const eventId = event._id;
+
+      // Schedule transitions first
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventStatusTransitions(ctx, eventId, Date.now(), Date.now() + 1000);
+      });
+
+      const statuses = await t.runWithCtx(async (ctx) => {
+        return await getEventScheduleStatuses(ctx, eventId);
+      });
+
+      expect(statuses).toHaveProperty("onEventStart");
+      expect(statuses).toHaveProperty("onEventEnd");
+      expect(statuses.onEventStart).toBe("pending");
+      expect(statuses.onEventEnd).toBe("pending");
+    });
+
+    it("should return null statuses when no schedules exist", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(seriesId, clubId, userId, Date.now()),
+      );
+      const eventId = event._id;
+
+      const statuses = await t.runWithCtx(async (ctx) => {
+        return await getEventScheduleStatuses(ctx, eventId);
+      });
+
+      expect(statuses.onEventStart).toBeNull();
+      expect(statuses.onEventEnd).toBeNull();
+    });
+  });
+
+  describe("Automatic cancellation on deletion", () => {
+    it("should cancel scheduled functions when event is deleted", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(seriesId, clubId, userId, Date.now()),
+      );
+      const eventId = event._id;
+
+      // Schedule transitions
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventStatusTransitions(ctx, eventId, Date.now() + 1000, Date.now() + 2000);
+      });
+
+      // Verify functions exist
+      const eventWithEdges = await eventHelpers.getEvent(eventId);
+      expect(eventWithEdges).not.toBeNull();
+      const startFunctionId = eventWithEdges!.onEventStartFunctionId;
+      const endFunctionId = eventWithEdges!.onEventEndFunctionId;
+      expect(startFunctionId).toBeDefined();
+      expect(endFunctionId).toBeDefined();
+      const startFunctionBefore = await schedulerHelpers.getScheduledFunction(startFunctionId!);
+      expect(startFunctionBefore?.state.kind).toBe("pending");
+      const endFunctionBefore = await schedulerHelpers.getScheduledFunction(endFunctionId!);
+      expect(endFunctionBefore?.state.kind).toBe("pending");
+
+      // Delete event
+      await t.runWithCtx(async (ctx) => {
+        await ctx.table("events").getX(eventId).delete();
+      });
+
+      // Verify scheduled functions are cancelled
+      const startFunction = await schedulerHelpers.getScheduledFunction(startFunctionId!);
+      const endFunction = await schedulerHelpers.getScheduledFunction(endFunctionId!);
+      expect(startFunction?.state.kind).toBe("canceled");
+      expect(endFunction?.state.kind).toBe("canceled");
+    });
+
+    it("should cancel scheduled functions when event series is deleted", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+      const seriesId = series._id;
+
+      // Schedule deactivation
+      await t.runWithCtx(async (ctx) => {
+        await scheduleEventSeriesDeactivation(ctx, seriesId, Date.now() + 86400000);
+      });
+
+      // Verify function exists
+      const seriesWithEdges = await eventHelpers.getEventSeries(seriesId);
+      expect(seriesWithEdges).not.toBeNull();
+      const functionId = seriesWithEdges!.onSeriesEndFunctionId;
+      expect(functionId).toBeDefined();
+      const scheduledFunctionBefore = await schedulerHelpers.getScheduledFunction(functionId!);
+      expect(scheduledFunctionBefore?.state.kind).toBe("pending");
+
+      // Delete event series
+      await t.runWithCtx(async (ctx) => {
+        await ctx.table("eventSeries").getX(seriesId).delete();
+      });
+
+      // Verify scheduled function is cancelled
+      const scheduledFunction = await schedulerHelpers.getScheduledFunction(functionId!);
+      expect(scheduledFunction?.state.kind).toBe("canceled");
     });
   });
 });

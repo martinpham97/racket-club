@@ -1,5 +1,4 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   END_TIME_AFTER_START_ERROR,
@@ -33,7 +32,11 @@ import {
   MAX_PARTICIPANTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import { getClubMembershipForUser, listAllClubMembers } from "@/convex/service/clubs/database";
+import {
+  getClubMembershipForUser,
+  getClubOrThrow,
+  listAllClubMembers,
+} from "@/convex/service/clubs/database";
 import { Club, ClubMembership } from "@/convex/service/clubs/schemas";
 import {
   Event,
@@ -46,7 +49,7 @@ import {
   TimeslotInput,
 } from "@/convex/service/events/schemas";
 import { getTimeDurationInMinutes } from "@/convex/service/utils/time";
-import { getOrThrow } from "convex-helpers/server/relationships";
+import { QueryCtx } from "@/convex/types";
 import { ConvexError } from "convex/values";
 import { differenceInDays, differenceInMonths, isFuture } from "date-fns";
 import format from "string-template";
@@ -238,7 +241,7 @@ export const validateEventTimeslots = (
     throw new ConvexError(EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR);
   }
 
-  const memberUserIds = new Set((clubMembers || []).map((m) => m.userId));
+  const memberUserIds = new Set(clubMembers.map((m) => m.userId));
 
   timeslots.forEach((timeslotInput) => {
     if (timeslotInput.maxParticipants <= 0) {
@@ -372,7 +375,7 @@ export const validateEventAccess = async (
   }
 
   if (event.visibility === EVENT_VISIBILITY.MEMBERS_ONLY) {
-    const club = await getOrThrow(ctx, event.clubId);
+    const club = await getClubOrThrow(ctx, event.clubId);
     const membership = await getClubMembershipForUser(ctx, club._id, userId);
     if (!membership) {
       throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);

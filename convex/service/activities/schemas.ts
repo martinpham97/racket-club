@@ -1,7 +1,8 @@
 import { DataModel } from "@/convex/_generated/dataModel";
 import { activityTypes } from "@/convex/constants/activities";
+import { defineEnt } from "convex-ents";
 import { zid, zodToConvex } from "convex-helpers/server/zod";
-import { defineTable, DocumentByName } from "convex/server";
+import { DocumentByName } from "convex/server";
 import z from "zod";
 
 export const resourceIdSchema = z.union([
@@ -44,11 +45,10 @@ export type Activity = DocumentByName<DataModel, "activities">;
 export type ActivityMetadata = z.infer<typeof activityMetadataSchema>;
 export type ActivityCreateInput = z.infer<typeof activityInputSchema>;
 
-export const activityTable = defineTable(zodToConvex(activitySchema))
+export const activityTable = defineEnt(zodToConvex(activitySchema))
   .index("resourceType", ["resourceId", "type"])
   .index("resourceDate", ["resourceId", "date"])
   .index("resourceTypeScheduledAt", ["resourceId", "type", "scheduledAt"])
-  .index("createdBy", ["createdBy"])
   .index("relatedId", ["relatedId"]);
 
 export const activityTables = {

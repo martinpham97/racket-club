@@ -1,12 +1,15 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import {
   EVENT_TIMESLOT_FULL_ERROR,
   EVENT_TIMESLOT_INVALID_ID_ERROR,
 } from "@/convex/constants/errors";
+import {
+  listAllEventParticipants,
+  listEventParticipationsForUser,
+} from "@/convex/service/events/database";
+import { Event, EventParticipant, Timeslot } from "@/convex/service/events/schemas";
+import { MutationCtx, QueryCtx } from "@/convex/types";
 import { ConvexError } from "convex/values";
-import { listAllEventParticipants, listEventParticipationsForUser } from "../database";
-import { Event, EventParticipant, Timeslot } from "../schemas";
 
 /**
  * Retrieves a timeslot by ID or throws an error if not found
@@ -79,7 +82,10 @@ export const promoteWaitlistedParticipant = async (
       const nextParticipant = waitlisted.reduce((earliest, current) =>
         current.joinedAt < earliest.joinedAt ? current : earliest,
       );
-      await ctx.db.patch(nextParticipant._id, { isWaitlisted: false, joinedAt: Date.now() });
+      await ctx
+        .table("eventParticipants")
+        .getX(nextParticipant._id)
+        .patch({ isWaitlisted: false, joinedAt: Date.now() });
     }
   }
 };

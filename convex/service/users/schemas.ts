@@ -1,6 +1,7 @@
 import { DataModel } from "@/convex/_generated/dataModel";
+import { defineEnt } from "convex-ents";
 import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
-import { defineTable, DocumentByName } from "convex/server";
+import { DocumentByName } from "convex/server";
 import z from "zod";
 
 export const skillLevelSchema = z.enum(["A", "B", "C", "D", "E", "OPEN"]);
@@ -23,6 +24,15 @@ export const userProfileSchema = z.object({
   preferredPlayStyle: preferredPlayStyleSchema.optional(),
   bio: z.string().max(300, "Bio must be 300 characters or fewer.").optional(),
   isAdmin: z.boolean(),
+});
+
+export const baseUserSchema = z.object({
+  name: z.optional(z.string()),
+  image: z.optional(z.string().url()),
+  emailVerificationTime: z.optional(z.number()),
+  phone: z.optional(z.string()),
+  phoneVerificationTime: z.optional(z.number()),
+  isAnonymous: z.optional(z.boolean()),
 });
 
 const baseUserDetailsSchema = z.object({
@@ -51,10 +61,28 @@ export type UserProfile = DocumentByName<DataModel, "userProfiles">;
 export type UserDetails = z.infer<typeof userDetailsSchema>;
 export type UserDetailsWithProfile = z.infer<typeof userDetailsWithProfileSchema>;
 
-export const userProfileTable = defineTable(zodToConvex(userProfileSchema))
-  .index("userId", ["userId"])
-  .index("isAdmin", ["isAdmin"]);
+export const userProfileInputSchema = userProfileCreateSchema;
+
+export const userProfileTable = defineEnt(zodToConvex(userProfileSchema))
+  .index("isAdmin", ["isAdmin"])
+  .edge("user", { to: "users", field: "userId" });
+
+export const userTable = defineEnt(zodToConvex(baseUserSchema))
+  .field("email", zodToConvex(z.optional(z.string().email())), { unique: true })
+  // 1:1 Profile relationship
+  .edge("profile", { to: "userProfiles", ref: "userId" })
+  // Club ownership and membership
+  .edges("createdClubs", { to: "clubs", ref: "createdBy" })
+  .edges("clubMemberships", { to: "clubMemberships", ref: "userId" })
+  // Ban relationships (dual perspective)
+  .edges("clubBanRecords", { to: "clubBans", ref: "userId" })
+  .edges("bannedUsers", { to: "clubBans", ref: "bannedBy" })
+  // Event creation and participation
+  .edges("createdEventSeries", { to: "eventSeries", ref: "createdBy" })
+  .edges("createdEvents", { to: "events", ref: "createdBy" })
+  .edges("eventParticipations", { to: "eventParticipants", ref: "userId" });
 
 export const userTables = {
+  users: userTable,
   userProfiles: userProfileTable,
 };

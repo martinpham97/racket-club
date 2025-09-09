@@ -43,7 +43,7 @@ export const CLUB_OWNER_CANNOT_LEAVE_ERROR =
   "You cannot leave this club as you are the club owner.";
 
 export const CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR =
-  "A public club with the same name already exists. Please consider renaming your club or create a private club.";
+  "A public club or a request to create a public club with the same name already exists. Please consider renaming your club or create a private club.";
 
 export const CLUB_PUBLIC_UNAPPROVED_ERROR =
   "You cannot join this club. This public club has not yet been approved.";
@@ -72,6 +72,8 @@ export const EVENT_INVALID_SCHEDULE_ERROR = "Invalid event schedule.";
 export const EVENT_LEVEL_MISMATCH_ERROR = "Your skill level does not match the event requirements.";
 
 export const EVENT_NOT_FOUND_ERROR = "This event does not exist.";
+
+export const EVENT_SERIES_NOT_FOUND_ERROR = "This event series does not exist.";
 
 export const EVENT_NOT_JOINED_ERROR = "You have not joined this event.";
 

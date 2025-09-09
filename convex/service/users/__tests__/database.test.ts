@@ -8,8 +8,8 @@ import {
   getProfileByUserId,
   updateUserProfile,
 } from "@/convex/service/users/database";
+import { convexTest } from "@/convex/setup.testing";
 import { createTestProfile, generateTestEmail, UserTestHelpers } from "@/test-utils/samples/users";
-import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 
 describe("User Database Service", () => {
@@ -19,11 +19,10 @@ describe("User Database Service", () => {
   describe("findUserByEmail", () => {
     it("returns user when found", async () => {
       const email = generateTestEmail();
-      const userId = await userHelpers.insertUser(email);
+      const user = await userHelpers.insertUser(email);
+      const userId = user._id;
 
-      const result = await t.run(async (ctx) => {
-        return await findUserByEmail(ctx, email);
-      });
+      const result = await t.runWithCtx((ctx) => findUserByEmail(ctx, email));
 
       expect(result).not.toBeNull();
       expect(result!._id).toBe(userId);
@@ -31,9 +30,7 @@ describe("User Database Service", () => {
     });
 
     it("returns null when user not found", async () => {
-      const result = await t.run(async (ctx) => {
-        return await findUserByEmail(ctx, "nonexistent@example.com");
-      });
+      const result = await t.runWithCtx((ctx) => findUserByEmail(ctx, "nonexistent@example.com"));
 
       expect(result).toBeNull();
     });
@@ -41,40 +38,31 @@ describe("User Database Service", () => {
 
   describe("getCurrentUser", () => {
     it("returns user with profile when authenticated", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      await userHelpers.insertProfile(profile);
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const profile = await userHelpers.insertProfile(createTestProfile(userId));
 
-      const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.run(async (ctx) => {
-        return await getCurrentUser(ctx);
-      });
+      const result = await t.runAsUser(userId)((ctx) => getCurrentUser(ctx));
 
       expect(result).not.toBeNull();
       expect(result!._id).toBe(userId);
-      expect(result!.profile).not.toBeNull();
+      expect(result!.profile).toEqual(profile);
     });
 
     it("returns null when not authenticated", async () => {
-      const result = await t.run(async (ctx) => {
-        return await getCurrentUser(ctx);
-      });
+      const result = await t.runWithCtx((ctx) => getCurrentUser(ctx));
 
       expect(result).toBeNull();
     });
 
     it("returns null when authenticated user is deleted", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
 
       // Delete the user
-      await t.run(async (ctx) => {
-        await ctx.db.delete(userId);
-      });
+      await userHelpers.deleteUser(userId);
 
-      const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.run(async (ctx) => {
-        return await getCurrentUser(ctx);
-      });
+      const result = await t.runAsUser(userId)((ctx) => getCurrentUser(ctx));
 
       expect(result).toBeNull();
     });
@@ -82,25 +70,20 @@ describe("User Database Service", () => {
 
   describe("getProfileByUserId", () => {
     it("returns profile when found", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId);
-      const profileId = await userHelpers.insertProfile(profile);
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const profile = await userHelpers.insertProfile(createTestProfile(userId));
 
-      const result = await t.run(async (ctx) => {
-        return await getProfileByUserId(ctx, userId);
-      });
+      const result = await t.runWithCtx((ctx) => getProfileByUserId(ctx, userId));
 
-      expect(result).not.toBeNull();
-      expect(result!._id).toBe(profileId);
-      expect(result!.userId).toBe(userId);
+      expect(result).toEqual(profile);
     });
 
     it("returns null when profile not found", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
 
-      const result = await t.run(async (ctx) => {
-        return await getProfileByUserId(ctx, userId);
-      });
+      const result = await t.runWithCtx((ctx) => getProfileByUserId(ctx, userId));
 
       expect(result).toBeNull();
     });
@@ -108,14 +91,12 @@ describe("User Database Service", () => {
 
   describe("createUserProfile", () => {
     it("creates new profile when none exists", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const input = createTestProfile(userId, { firstName: "John", lastName: "Doe" });
 
-      const profileId = await t.run(async (ctx) => {
-        return await createUserProfile(ctx, input);
-      });
+      const profile = await t.runWithCtx((ctx) => createUserProfile(ctx, userId, input));
 
-      const profile = await userHelpers.getProfile(profileId);
       expect(profile).not.toBeNull();
       expect(profile!.firstName).toBe("John");
       expect(profile!.lastName).toBe("Doe");
@@ -124,30 +105,38 @@ describe("User Database Service", () => {
   });
 
   describe("updateUserProfile", () => {
-    it("updates existing profile", async () => {
-      const userId = await userHelpers.insertUser();
-      const profile = createTestProfile(userId, { firstName: "Original", lastName: "Name" });
-      const profileId = await userHelpers.insertProfile(profile);
+    it("updates existing profile and returns updated profile", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const profile = await userHelpers.insertProfile(
+        createTestProfile(userId, { firstName: "Original", lastName: "Name" }),
+      );
+      const profileId = profile._id;
       const updateData = { userId, firstName: "Updated", lastName: "Name" };
 
-      await t.run(async (ctx) => {
-        await updateUserProfile(ctx, profileId, updateData);
-      });
+      const updatedProfile = await t.runWithCtx((ctx) =>
+        updateUserProfile(ctx, profileId, updateData),
+      );
 
-      const updatedProfile = await userHelpers.getProfile(profileId);
-      expect(updatedProfile!.firstName).toBe("Updated");
-      expect(updatedProfile!.lastName).toBe("Name");
+      expect(updatedProfile.firstName).toBe("Updated");
+      expect(updatedProfile.lastName).toBe("Name");
+      expect(updatedProfile._id).toBe(profileId);
+      expect(updatedProfile.userId).toBe(userId);
+
+      // Validate with separate database fetch
+      const fetchedProfile = await userHelpers.getProfile(profileId);
+      expect(fetchedProfile!.firstName).toBe("Updated");
+      expect(fetchedProfile!.lastName).toBe("Name");
     });
   });
 
   describe("getOrCreateUser", () => {
     it("returns existing user ID when provided", async () => {
-      const existingUserId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const existingUserId = user._id;
       const args = { existingUserId };
 
-      const result = await t.run(async (ctx) => {
-        return await getOrCreateUser(ctx, args);
-      });
+      const result = await t.runWithCtx((ctx) => getOrCreateUser(ctx, args));
 
       expect(result).toBe(existingUserId);
     });
@@ -155,21 +144,18 @@ describe("User Database Service", () => {
     it("throws error when no email provided", async () => {
       const args = {};
 
-      await expect(
-        t.run(async (ctx) => {
-          return await getOrCreateUser(ctx, args);
-        }),
-      ).rejects.toThrow(AUTH_PROVIDER_NO_EMAIL_ERROR);
+      await expect(t.runWithCtx((ctx) => getOrCreateUser(ctx, args))).rejects.toThrow(
+        AUTH_PROVIDER_NO_EMAIL_ERROR,
+      );
     });
 
     it("returns existing user ID when user found by email", async () => {
       const email = generateTestEmail("existing");
-      const existingUserId = await userHelpers.insertUser(email);
+      const user = await userHelpers.insertUser(email);
+      const existingUserId = user._id;
       const args = { email };
 
-      const result = await t.run(async (ctx) => {
-        return await getOrCreateUser(ctx, args);
-      });
+      const result = await t.runWithCtx((ctx) => getOrCreateUser(ctx, args));
 
       expect(result).toBe(existingUserId);
     });
@@ -178,14 +164,9 @@ describe("User Database Service", () => {
       const email = generateTestEmail("new");
       const args = { email };
 
-      const result = await t.run(async (ctx) => {
-        return await getOrCreateUser(ctx, args);
-      });
+      const result = await t.runWithCtx((ctx) => getOrCreateUser(ctx, args));
 
-      const user = await t.run(async (ctx) => {
-        return await ctx.db.get(result);
-      });
-
+      const user = await userHelpers.getUser(result);
       expect(user).not.toBeNull();
       expect(user!.email).toBe(email);
     });

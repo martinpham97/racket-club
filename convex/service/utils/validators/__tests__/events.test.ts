@@ -1,4 +1,4 @@
-import { QueryCtx } from "@/convex/_generated/server";
+import { Id } from "@/convex/_generated/dataModel";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   END_TIME_AFTER_START_ERROR,
@@ -30,8 +30,8 @@ import {
   MAX_PARTICIPANTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import * as clubDatabase from "@/convex/service/clubs/database";
-import { EventCreateInput } from "@/convex/service/events/schemas";
+import schema from "@/convex/schema";
+import { ClubMembership } from "@/convex/service/clubs/schemas";
 import {
   isEventDateRangeValid,
   validateEventAccess,
@@ -46,21 +46,23 @@ import {
   validateEventVisibility,
   validateRecurringSchedule,
 } from "@/convex/service/utils/validators/events";
-import { createMockCtx } from "@/test-utils/mocks/ctx";
-import { createTestClubMembershipRecord, createTestClubRecord } from "@/test-utils/samples/clubs";
+import { convexTest } from "@/convex/setup.testing";
 import {
-  createTestEventRecord,
+  ClubTestHelpers,
+  createTestClub,
+  createTestClubMembership,
+} from "@/test-utils/samples/clubs";
+import {
+  createTestEvent,
+  createTestEventInput,
+  createTestEventSeries,
   createTestEventSeriesInput,
-  createTestEventSeriesRecord,
-  createTestTimeslot,
   createTestTimeslotInput,
+  EventTestHelpers,
 } from "@/test-utils/samples/events";
 import { genId } from "@/test-utils/samples/id";
-import { createTestUserRecord } from "@/test-utils/samples/users";
+import { UserTestHelpers } from "@/test-utils/samples/users";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@/convex/service/clubs/database");
-const mockGetClubMembershipForUser = vi.mocked(clubDatabase.getClubMembershipForUser);
 
 // Date calculation constants
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -212,45 +214,90 @@ describe("validateRecurringSchedule", () => {
 });
 
 describe("validateEventVisibility", () => {
-  it("should allow public events for public clubs", () => {
-    const publicClub = createTestClubRecord(genId<"users">("users"), { isPublic: true });
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+
+  beforeEach(() => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+  });
+
+  it("should allow public events for public clubs", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const publicClub = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
 
     expect(() => validateEventVisibility(publicClub, EVENT_VISIBILITY.PUBLIC)).not.toThrow();
   });
 
-  it("should allow members-only events for public clubs", () => {
-    const publicClub = createTestClubRecord(genId<"users">("users"), { isPublic: true });
+  it("should allow members-only events for public clubs", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const publicClub = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
 
     expect(() => validateEventVisibility(publicClub, EVENT_VISIBILITY.MEMBERS_ONLY)).not.toThrow();
   });
 
-  it("should throw when private club tries to create public event", () => {
-    const privateClub = createTestClubRecord(genId<"users">("users"), { isPublic: false });
+  it("should throw when private club tries to create public event", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const privateClub = await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
 
     expect(() => validateEventVisibility(privateClub, EVENT_VISIBILITY.PUBLIC)).toThrow(
       EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
     );
   });
 
-  it("should allow members-only events for private clubs", () => {
-    const privateClub = createTestClubRecord(genId<"users">("users"), { isPublic: false });
+  it("should allow members-only events for private clubs", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const privateClub = await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
 
     expect(() => validateEventVisibility(privateClub, EVENT_VISIBILITY.MEMBERS_ONLY)).not.toThrow();
   });
 });
 
 describe("validateEventTimeslots", () => {
-  const startTime = "18:00";
-  const endTime = "20:00";
-  const clubId = genId<"clubs">("clubs");
-  const user1Id = genId<"users">("users");
-  const user2Id = genId<"users">("users");
-  const user3Id = genId<"users">("users");
-  const clubMembers = [
-    createTestClubMembershipRecord(clubId, user1Id),
-    createTestClubMembershipRecord(clubId, user2Id),
-    createTestClubMembershipRecord(clubId, user3Id),
-  ];
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let startTime: string;
+  let endTime: string;
+  let clubMembers: ClubMembership[];
+  let user1Id: Id<"users">;
+  let user2Id: Id<"users">;
+  let user3Id: Id<"users">;
+
+  beforeEach(async () => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    startTime = "18:00";
+    endTime = "20:00";
+
+    const user1 = await userHelpers.insertUser("user1@test.com");
+    user1Id = user1._id;
+    const user2 = await userHelpers.insertUser("user2@test.com");
+    user2Id = user2._id;
+    const user3 = await userHelpers.insertUser("user3@test.com");
+    user3Id = user3._id;
+    const clubOwner = await userHelpers.insertUser("owner@test.com");
+    const club = await clubHelpers.insertClub(createTestClub(clubOwner._id));
+    const clubId = club._id;
+
+    const membership1 = await clubHelpers.insertMembership(
+      createTestClubMembership(clubId, user1Id),
+    );
+    const membership2 = await clubHelpers.insertMembership(
+      createTestClubMembership(clubId, user2Id),
+    );
+    const membership3 = await clubHelpers.insertMembership(
+      createTestClubMembership(clubId, user3Id),
+    );
+    clubMembers = [membership1, membership2, membership3];
+  });
 
   describe("DURATION timeslots", () => {
     it("should throw when duration is missing", () => {
@@ -441,9 +488,14 @@ describe("validateEventTimeslots", () => {
 });
 
 describe("validateEventForCreate", () => {
-  let ctx: QueryCtx;
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+
   beforeEach(() => {
-    ctx = createMockCtx<QueryCtx>();
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
   });
@@ -453,125 +505,122 @@ describe("validateEventForCreate", () => {
   });
 
   it("should validate single event successfully", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const eventSeries = createTestEventSeriesRecord(club._id, user._id);
-    const date = Date.now() + ONE_DAY_MS;
-    const event: EventCreateInput = createTestEventRecord(
-      eventSeries._id,
-      club._id,
-      user._id,
-      date,
-      {
-        clubId: club._id,
-        name: "Test Event",
-        description: "Test Description",
-        startTime: "18:00",
-        endTime: "20:00",
-        visibility: EVENT_VISIBILITY.PUBLIC,
-        timeslots: [createTestTimeslot()],
-      },
-    );
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
-    );
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const event = createTestEventInput(clubId, {
+      date: Date.now() + ONE_DAY_MS,
+      startTime: "18:00",
+      endTime: "20:00",
+    });
 
-    await expect(validateEventForCreate(ctx, event, club)).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventForCreate(ctx, event, club)).resolves.not.toThrow();
+    });
   });
 });
 
 describe("validateEventSeriesForCreate", () => {
-  let ctx: QueryCtx;
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+
   beforeEach(() => {
-    ctx = createMockCtx<QueryCtx>();
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
   });
 
   it("should validate complete event series successfully", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const eventSeries = createTestEventSeriesInput(club._id);
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
-    );
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const eventSeries = createTestEventSeriesInput(clubId);
 
-    await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).resolves.not.toThrow();
+    });
   });
 
   it("should throw for invalid visibility", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: false });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const eventSeries = createTestEventSeriesInput(club._id, {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const eventSeries = createTestEventSeriesInput(clubId, {
       visibility: EVENT_VISIBILITY.PUBLIC,
     });
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
-    );
 
-    await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).rejects.toThrow(
-      EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
-    );
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).rejects.toThrow(
+        EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
+      );
+    });
   });
 
   it("should throw for invalid timeslots", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const eventSeries = createTestEventSeriesInput(club._id, {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const eventSeries = createTestEventSeriesInput(clubId, {
       timeslots: [createTestTimeslotInput({ duration: undefined })],
     });
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
-    );
 
-    await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).rejects.toThrow(
-      TIMESLOT_DURATION_REQUIRED_ERROR,
-    );
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventSeriesForCreate(ctx, eventSeries, club)).rejects.toThrow(
+        TIMESLOT_DURATION_REQUIRED_ERROR,
+      );
+    });
   });
 });
 
 describe("validateEventStatusForJoinLeave", () => {
-  it("should pass when event status is NOT_STARTED", () => {
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      genId<"clubs">("clubs"),
-      genId<"users">("users"),
-      Date.now(),
-      { status: EVENT_STATUS.NOT_STARTED },
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let _eventHelpers: EventTestHelpers;
+
+  beforeEach(() => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    _eventHelpers = new EventTestHelpers(t);
+  });
+
+  it("should pass when event status is NOT_STARTED", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await _eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        status: EVENT_STATUS.NOT_STARTED,
+      }),
     );
 
     expect(() => validateEventStatusForJoinLeave(event)).not.toThrow();
   });
 
-  it("should throw when event status is IN_PROGRESS", () => {
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      genId<"clubs">("clubs"),
-      genId<"users">("users"),
-      Date.now(),
-      { status: EVENT_STATUS.IN_PROGRESS },
+  it("should throw when event status is IN_PROGRESS", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await _eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        status: EVENT_STATUS.IN_PROGRESS,
+      }),
     );
 
     expect(() => validateEventStatusForJoinLeave(event)).toThrow(
@@ -579,13 +628,17 @@ describe("validateEventStatusForJoinLeave", () => {
     );
   });
 
-  it("should throw when event status is COMPLETED", () => {
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      genId<"clubs">("clubs"),
-      genId<"users">("users"),
-      Date.now(),
-      { status: EVENT_STATUS.COMPLETED },
+  it("should throw when event status is COMPLETED", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await _eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        status: EVENT_STATUS.COMPLETED,
+      }),
     );
 
     expect(() => validateEventStatusForJoinLeave(event)).toThrow(
@@ -593,13 +646,17 @@ describe("validateEventStatusForJoinLeave", () => {
     );
   });
 
-  it("should throw when event status is CANCELLED", () => {
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      genId<"clubs">("clubs"),
-      genId<"users">("users"),
-      Date.now(),
-      { status: EVENT_STATUS.CANCELLED },
+  it("should throw when event status is CANCELLED", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await _eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        status: EVENT_STATUS.CANCELLED,
+      }),
     );
 
     expect(() => validateEventStatusForJoinLeave(event)).toThrow(
@@ -609,9 +666,16 @@ describe("validateEventStatusForJoinLeave", () => {
 });
 
 describe("validateEventSeriesForUpdate", () => {
-  let ctx: QueryCtx;
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let eventHelpers: EventTestHelpers;
+
   beforeEach(() => {
-    ctx = createMockCtx<QueryCtx>();
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    eventHelpers = new EventTestHelpers(t);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
   });
@@ -621,60 +685,66 @@ describe("validateEventSeriesForUpdate", () => {
   });
 
   it("should validate partial update successfully", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
-    const updateInput = { visibility: EVENT_VISIBILITY.MEMBERS_ONLY };
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const existingEventSeries = await eventHelpers.insertEventSeries(
+      createTestEventSeries(clubId, userId),
     );
+    const updateInput = { visibility: EVENT_VISIBILITY.MEMBERS_ONLY };
 
-    await expect(
-      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
-    ).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(
+        validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
+      ).resolves.not.toThrow();
+    });
   });
 
   it("should throw for invalid visibility update", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: false });
-    const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
+    const clubId = club._id;
+    const existingEventSeries = await eventHelpers.insertEventSeries(
+      createTestEventSeries(clubId, userId),
+    );
     const updateInput = { visibility: EVENT_VISIBILITY.PUBLIC };
 
-    await expect(
-      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
-    ).rejects.toThrow(EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR);
+    await t.runWithCtx(async (ctx) => {
+      await expect(
+        validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
+      ).rejects.toThrow(EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR);
+    });
   });
 
   it("should validate timeslots update with existing schedule", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const clubMembers = [createTestClubMembershipRecord(club._id, user._id)];
-    const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
-    const updateInput = { timeslots: [createTestTimeslotInput()] };
-    const mockQuery = {
-      withIndex: vi.fn(() => ({
-        collect: vi.fn().mockResolvedValueOnce(clubMembers),
-      })),
-    };
-    vi.mocked(ctx.db.query).mockReturnValueOnce(
-      mockQuery as unknown as ReturnType<typeof ctx.db.query>,
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    const existingEventSeries = await eventHelpers.insertEventSeries(
+      createTestEventSeries(clubId, userId),
     );
+    const updateInput = { timeslots: [createTestTimeslotInput()] };
 
-    await expect(
-      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
-    ).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(
+        validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
+      ).resolves.not.toThrow();
+    });
   });
 
   it("should validate schedule and recurrence update together", async () => {
-    const user = createTestUserRecord();
-    const club = createTestClubRecord(user._id, { isPublic: true });
-    const existingEventSeries = createTestEventSeriesRecord(club._id, user._id);
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+    const clubId = club._id;
+    const existingEventSeries = await eventHelpers.insertEventSeries(
+      createTestEventSeries(clubId, userId),
+    );
     const updateInput = {
       schedule: {
         startDate: Date.now() + 2 * ONE_DAY_MS,
@@ -684,9 +754,11 @@ describe("validateEventSeriesForUpdate", () => {
       },
     };
 
-    await expect(
-      validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
-    ).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(
+        validateEventSeriesForUpdate(ctx, club, existingEventSeries, updateInput),
+      ).resolves.not.toThrow();
+    });
   });
 });
 
@@ -705,61 +777,78 @@ describe("validateEventDateRange", () => {
 });
 
 describe("validateEventAccess", () => {
-  let ctx: QueryCtx;
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let eventHelpers: EventTestHelpers;
+
   beforeEach(() => {
-    ctx = createMockCtx<QueryCtx>();
-    vi.clearAllMocks();
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    eventHelpers = new EventTestHelpers(t);
   });
 
   it("should pass for public events", async () => {
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      genId<"clubs">("clubs"),
-      genId<"users">("users"),
-      Date.now(),
-      { visibility: EVENT_VISIBILITY.PUBLIC },
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        visibility: EVENT_VISIBILITY.PUBLIC,
+      }),
     );
-    const userId = genId<"users">("users");
+    const otherUser = await userHelpers.insertUser("other@test.com");
+    const otherUserId = otherUser._id;
 
-    await expect(validateEventAccess(ctx, event, userId)).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventAccess(ctx, event, otherUserId)).resolves.not.toThrow();
+    });
   });
 
   it("should pass for members-only events when user is a member", async () => {
-    const clubId = genId<"clubs">("clubs");
-    const userId = genId<"users">("users");
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      clubId,
-      genId<"users">("users"),
-      Date.now(),
-      { visibility: EVENT_VISIBILITY.MEMBERS_ONLY, clubId },
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const memberUser = await userHelpers.insertUser("member@test.com");
+    const memberUserId = memberUser._id;
+    await clubHelpers.insertMembership(createTestClubMembership(clubId, memberUserId));
+    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        visibility: EVENT_VISIBILITY.MEMBERS_ONLY,
+      }),
     );
-    const membership = createTestClubMembershipRecord(clubId, userId);
 
-    vi.mocked(ctx.db.get).mockResolvedValue(
-      createTestClubRecord(genId<"users">("users"), { _id: clubId }),
-    );
-    mockGetClubMembershipForUser.mockResolvedValue(membership);
-
-    await expect(validateEventAccess(ctx, event, userId)).resolves.not.toThrow();
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventAccess(ctx, event, memberUserId)).resolves.not.toThrow();
+    });
   });
 
   it("should throw for members-only events when user is not a member", async () => {
-    const clubId = genId<"clubs">("clubs");
-    const userId = genId<"users">("users");
-    const event = createTestEventRecord(
-      genId<"eventSeries">("eventSeries"),
-      clubId,
-      genId<"users">("users"),
-      Date.now(),
-      { visibility: EVENT_VISIBILITY.MEMBERS_ONLY, clubId },
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const nonMemberUser = await userHelpers.insertUser("nonmember@test.com");
+    const nonMemberUserId = nonMemberUser._id;
+    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
+    const seriesId = series._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(seriesId, clubId, userId, Date.now(), {
+        visibility: EVENT_VISIBILITY.MEMBERS_ONLY,
+      }),
     );
 
-    vi.mocked(ctx.db.get).mockResolvedValue(
-      createTestClubRecord(genId<"users">("users"), { _id: clubId }),
-    );
-    mockGetClubMembershipForUser.mockResolvedValue(null);
-
-    await expect(validateEventAccess(ctx, event, userId)).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    await t.runWithCtx(async (ctx) => {
+      await expect(validateEventAccess(ctx, event, nonMemberUserId)).rejects.toThrow(
+        AUTH_ACCESS_DENIED_ERROR,
+      );
+    });
   });
 });

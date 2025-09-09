@@ -2,9 +2,9 @@ import {
   USER_PROFILE_DOB_IN_FUTURE_ERROR,
   USER_PROFILE_DOB_INVALID_ERROR,
 } from "@/convex/constants/errors";
+import { validateDateOfBirth } from "@/convex/service/utils/validators/profile";
 import { ConvexError } from "convex/values";
 import { describe, expect, it } from "vitest";
-import { validateDateOfBirth } from "../profile";
 
 describe("Profile Validators", () => {
   describe("validateDateOfBirth", () => {

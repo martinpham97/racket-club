@@ -1,7 +1,7 @@
 import { MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
+import { EventSeries } from "@/convex/service/events/schemas";
 import { addDays } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { EventSeries } from "../schemas";
 
 /**
  * Generates upcoming event dates based on series recurrence pattern

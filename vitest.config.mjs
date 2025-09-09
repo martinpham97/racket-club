@@ -25,6 +25,7 @@ export default defineConfig({
         "convex/constants/**",
         "convex/auth.ts",
         "convex/http.ts",
+        "convex/migrations.ts",
         "**/schemas.ts",
         // Types and typings
         "**/*.d.ts",

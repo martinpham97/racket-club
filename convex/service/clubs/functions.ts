@@ -1,63 +1,54 @@
-import { Id } from "@/convex/_generated/dataModel";
-import { MutationCtx } from "@/convex/_generated/server";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
-  AUTH_ACCESS_DENIED_ERROR,
   CLUB_CANNOT_BAN_OWNER_ERROR,
   CLUB_CANNOT_BAN_SELF_ERROR,
-  CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR,
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
-  CLUB_MEMBERSHIP_REQUIRED_ERROR,
   CLUB_OWNER_CANNOT_LEAVE_ERROR,
-  CLUB_USER_BANNED_ERROR,
   CLUB_USER_NOT_BANNED_ERROR,
 } from "@/convex/constants/errors";
+import { authenticatedMutation, authenticatedQuery, publicQuery } from "@/convex/functions";
 import {
   createActivity as dtoCreateActivity,
   listActivitiesForResource as dtoListActivitiesForResource,
 } from "@/convex/service/activities/database";
-import { ActivityMetadata, activitySchema } from "@/convex/service/activities/schemas";
-import { UserDetailsWithProfile } from "@/convex/service/users/schemas";
-import {
-  authenticatedMutationWithRLS,
-  authenticatedQueryWithRLS,
-  AuthenticatedWithProfileCtx,
-  publicQueryWithRLS,
-} from "@/convex/service/utils/functions";
+import { activitySchema } from "@/convex/service/activities/schemas";
 import { getMetadata } from "@/convex/service/utils/metadata";
+import { paginatedResult } from "@/convex/service/utils/pagination";
 import {
   enforceClubMembershipPermissions,
   enforceClubOwnershipOrAdmin,
+  isClubOwner,
   validateBulkMemberships,
   validateClubJoinability,
+  validateClubMembershipExists,
   validateClubName,
   validateClubUpdateInput,
+  validateMembershipDoesNotExist,
   validateMembershipExists,
+  validateUserNotBanned,
 } from "@/convex/service/utils/validators/clubs";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
-import { getOrThrow } from "convex-helpers/server/relationships";
 import { convexToZod, withSystemFields, zid } from "convex-helpers/server/zod";
-import { paginationOptsValidator, WithoutSystemFields } from "convex/server";
+import { paginationOptsValidator } from "convex/server";
 import { ConvexError } from "convex/values";
 import { z } from "zod";
-import { paginatedResult } from "../utils/pagination";
 import {
   createClub as dtoCreateClub,
-  deleteAllClubMemberships as dtoDeleteAllClubMemberships,
-  getClubBanRecordForUser as dtoGetClubBanRecordForUser,
-  getClubMembershipForUser as dtoGetClubMembershipForUser,
+  getActiveClubBanRecords as dtoGetActiveClubBanRecords,
+  getActiveClubBanRecordForUser as dtoGetClubBanRecordForUser,
+  getClubMembershipOrThrow as dtoGetClubMembershipOrThrow,
+  getClubOrThrow as dtoGetClubOrThrow,
   listClubsForUser as dtoListClubsForUser,
   listPublicClubs as dtoListPublicClubs,
   updateClub as dtoUpdateClub,
+  updateClubMembership as dtoUpdateClubMembership,
 } from "./database";
+import { addUserToClub, updateClubMemberCount } from "./helpers/membership";
 import {
-  Club,
   clubBanReasonSchema,
   clubBanSchema,
   clubCreateInputSchema,
   clubDetailsSchema,
-  ClubMembership,
-  ClubMembershipInput,
   clubMembershipInputSchema,
   clubMembershipSchema,
   clubMembershipUpdateInputSchema,
@@ -65,39 +56,39 @@ import {
   clubUpdateInputSchema,
 } from "./schemas";
 
-interface AddUserToClubOptions {
-  isApproved?: boolean;
-  isAdmin?: boolean;
-  membershipInfo?: ClubMembershipInput;
-}
-
 // ============================================================================
 // QUERY FUNCTIONS
 // ============================================================================
 
 /**
  * Lists all public and approved clubs with pagination.
- * @param pagination - Pagination options (cursor, numItems)
+ * @param pagination Pagination options (cursor, numItems)
  * @returns Paginated result of public clubs
  */
-export const listPublicClubs = publicQueryWithRLS()({
+export const listPublicClubs = publicQuery()({
   args: { pagination: convexToZod(paginationOptsValidator) },
   returns: paginatedResult(z.object(withSystemFields("clubs", clubSchema.shape))),
-  handler: async (ctx, args) => await dtoListPublicClubs(ctx, args.pagination),
+  handler: async (ctx, args) => {
+    return await dtoListPublicClubs(ctx, args.pagination);
+  },
 });
 
 /**
  * Lists all clubs that a user is a member of with pagination.
- * @param userId - ID of the user to get clubs for
- * @param pagination - Pagination options (cursor, numItems)
+ * @param userId ID of the user to get clubs for
+ * @param pagination Pagination options (cursor, numItems)
  * @returns Paginated result of user's clubs with membership details
  */
-export const listClubsForUser = authenticatedQueryWithRLS()({
+export const listClubsForUser = authenticatedQuery()({
   args: {
     userId: zid("users"),
     pagination: convexToZod(paginationOptsValidator),
   },
-  returns: paginatedResult(clubDetailsSchema),
+  returns: paginatedResult(
+    z.object(withSystemFields("clubs", clubSchema.shape)).extend({
+      membership: z.object(withSystemFields("clubMemberships", clubMembershipSchema.shape)),
+    }),
+  ),
   handler: async (ctx, args) => {
     return await dtoListClubsForUser(ctx, args.userId, args.pagination);
   },
@@ -105,36 +96,34 @@ export const listClubsForUser = authenticatedQueryWithRLS()({
 
 /**
  * Gets a specific club by ID.
- * @param clubId - ID of the club to retrieve
+ * @param clubId ID of the club to retrieve
  * @returns Club details
  * @throws ConvexError when club doesn't exist
  */
-export const getClub = publicQueryWithRLS()({
+export const getClub = publicQuery()({
   args: { clubId: zid("clubs") },
   returns: z.object(withSystemFields("clubs", clubSchema.shape)),
-  handler: async (ctx, args) => await getOrThrow(ctx, args.clubId),
+  handler: async (ctx, args) => {
+    return await dtoGetClubOrThrow(ctx, args.clubId);
+  },
 });
 
 /**
  * Lists activities for a club. Only members can see club activities.
- * @param clubId - ID of the club
- * @param pagination - Pagination options (cursor, numItems)
+ * @param clubId ID of the club
+ * @param pagination Pagination options (cursor, numItems)
  * @returns Paginated list of club activities
- * @throws ConvexError when user is not a club member
+ * @throws ConvexError when club is not found user is not a club member
  */
-export const listClubActivities = authenticatedQueryWithRLS()({
+export const listClubActivities = authenticatedQuery()({
   args: {
     clubId: zid("clubs"),
     pagination: convexToZod(paginationOptsValidator),
   },
   returns: paginatedResult(z.object(withSystemFields("activities", activitySchema.shape))),
   handler: async (ctx, args) => {
-    await getOrThrow(ctx, args.clubId);
-    const membership = await dtoGetClubMembershipForUser(ctx, args.clubId, ctx.currentUser._id);
-
-    if (!membership) {
-      throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
-    }
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
+    await validateClubMembershipExists(ctx, club._id, ctx.currentUser._id);
 
     return await dtoListActivitiesForResource(ctx, args.clubId, args.pagination);
   },
@@ -142,25 +131,22 @@ export const listClubActivities = authenticatedQueryWithRLS()({
 
 /**
  * Lists banned users for a club. Only club owner, club admin, or system admin can view bans.
- * @param clubId - ID of the club
- * @param pagination - Pagination options (cursor, numItems)
+ * @param clubId ID of the club
+ * @param pagination Pagination options (cursor, numItems)
  * @returns Paginated list of banned users
  * @throws ConvexError when club doesn't exist or user lacks permissions
  */
-export const listClubBans = authenticatedQueryWithRLS()({
+export const listClubBans = authenticatedQuery()({
   args: {
     clubId: zid("clubs"),
     pagination: convexToZod(paginationOptsValidator),
   },
   returns: paginatedResult(z.object(withSystemFields("clubBans", clubBanSchema.shape))),
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.clubId);
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
-    return ctx.db
-      .query("clubBans")
-      .withIndex("clubActive", (q) => q.eq("clubId", args.clubId).eq("isActive", true))
-      .paginate(args.pagination);
+    return dtoGetActiveClubBanRecords(ctx, club._id, args.pagination);
   },
 });
 
@@ -169,232 +155,235 @@ export const listClubBans = authenticatedQueryWithRLS()({
 // ============================================================================
 
 /**
- * Allows an authenticated user to join a club with membership details.
+ * Allows an authenticated user to request to join a club with membership details.
  * By default, the user membership is non-admin and not approved.
- * @param clubId - ID of the club to join
- * @param membershipInfo - Optional membership details
+ * @param clubId ID of the club to join
+ * @param membershipInfo Optional membership details, user's profile info is used if not specified
  * @returns Membership details
  * @throws ConvexError when club doesn't exist, user is banned, club is full, or user is already a member
  */
-export const joinClub = authenticatedMutationWithRLS()({
+export const requestToJoinClub = authenticatedMutation()({
   args: {
     clubId: zid("clubs"),
     membershipInfo: clubMembershipInputSchema.optional(),
   },
-  returns: clubMembershipSchema,
+  returns: z.object(withSystemFields("clubMemberships", clubMembershipSchema.shape)),
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "joinClub", ctx.currentUser._id + args.clubId);
-    const club = await getOrThrow(ctx, args.clubId);
-
-    const existingBan = await dtoGetClubBanRecordForUser(ctx, club._id, ctx.currentUser._id);
-    if (existingBan) {
-      throw new ConvexError(CLUB_USER_BANNED_ERROR);
-    }
-
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     validateClubJoinability(club);
+    await validateUserNotBanned(ctx, club._id, ctx.currentUser._id);
+    await validateMembershipDoesNotExist(ctx, club._id, ctx.currentUser._id);
 
-    const { membershipInfo } = await addCurrentUserToClub(ctx, args.clubId, {
-      membershipInfo: createClubMembershipInfo(ctx.currentUser, args.clubId, args.membershipInfo),
+    const { membership } = await addUserToClub(ctx, ctx.currentUser, club, {
+      membershipInfo: args.membershipInfo,
       isApproved: false,
     });
 
-    await createClubActivity(
-      ctx,
-      club._id,
-      membershipInfo.userId,
-      ACTIVITY_TYPES.CLUB_JOIN_REQUEST,
-      [{ newValue: membershipInfo.name }],
-    );
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: membership.userId,
+      type: ACTIVITY_TYPES.CLUB_JOIN_REQUEST,
+      metadata: [{ newValue: membership.name }],
+    });
 
-    return membershipInfo;
+    return membership;
   },
 });
 
 /**
  * Removes the currently authenticated user from a club.
- * @param clubId - ID of the club to leave
+ * @param clubId ID of the club to leave
  * @throws ConvexError when club doesn't exist, user is not a member, or user is the club owner
  */
-export const leaveClub = authenticatedMutationWithRLS()({
+export const leaveClub = authenticatedMutation()({
   args: { clubId: zid("clubs") },
   handler: async (ctx, args) => {
-    const { clubId } = args;
-    const club = await getOrThrow(ctx, clubId);
-
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     if (isClubOwner(club, ctx.currentUser._id)) {
       throw new ConvexError(CLUB_OWNER_CANNOT_LEAVE_ERROR);
     }
+    const existingMembership = await validateMembershipExists(ctx, club._id, ctx.currentUser._id);
 
-    const existingMembership = await ctx.db
-      .query("clubMemberships")
-      .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", ctx.currentUser._id))
-      .unique();
+    await ctx.table("clubMemberships").getX(existingMembership._id).delete();
 
-    if (!existingMembership) {
-      throw new ConvexError(CLUB_MEMBERSHIP_REQUIRED_ERROR);
-    }
-
-    await ctx.db.delete(existingMembership._id);
-    await updateMemberCount(ctx, clubId, -1);
-    await createClubActivity(
-      ctx,
-      args.clubId,
-      existingMembership.userId,
-      ACTIVITY_TYPES.CLUB_LEFT,
-      [{ previousValue: existingMembership.name }],
-    );
+    await updateClubMemberCount(ctx, club, -1);
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedId: existingMembership.userId,
+      type: ACTIVITY_TYPES.CLUB_LEFT,
+      metadata: [{ previousValue: existingMembership.name }],
+    });
   },
 });
 
 /**
  * Creates a new club with the authenticated user as the admin creator.
- * @param input - Club creation data
- * @param membershipInfo - Optional membership details for the creator
- * @returns Club ID
+ * @param input Club creation data
+ * @param membershipInfo Optional membership details for the creator
+ * @returns Club details
  * @throws ConvexError when club name validation fails
  */
-export const createClub = authenticatedMutationWithRLS()({
+export const createClub = authenticatedMutation()({
   args: {
     input: clubCreateInputSchema,
     membershipInfo: clubMembershipInputSchema.optional(),
   },
-  returns: zid("clubs"),
+  returns: clubDetailsSchema,
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "createClub", ctx.currentUser._id);
     await validateClubName(ctx, args.input.name, args.input.isPublic);
 
-    const clubId = await dtoCreateClub(ctx, args.input, ctx.currentUser._id);
+    const club = await dtoCreateClub(ctx, args.input, ctx.currentUser._id);
 
-    await createClubActivity(ctx, clubId, ctx.currentUser._id, ACTIVITY_TYPES.CLUB_CREATED, [
-      { newValue: args.input.name },
-    ]);
-
-    const { membershipInfo } = await addCurrentUserToClub(ctx, clubId, {
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.CLUB_CREATED,
+      metadata: [{ newValue: args.input.name }],
+    });
+    const clubDetails = await addUserToClub(ctx, ctx.currentUser, club, {
       isAdmin: true,
       membershipInfo: args.membershipInfo,
     });
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: clubDetails.membership.userId,
+      type: ACTIVITY_TYPES.CLUB_JOINED,
+      metadata: [{ newValue: clubDetails.membership.name }],
+    });
 
-    await createClubActivity(ctx, clubId, membershipInfo.userId, ACTIVITY_TYPES.CLUB_JOINED, [
-      { newValue: membershipInfo.name },
-    ]);
-
-    return clubId;
+    return clubDetails;
   },
 });
 
 /**
  * Updates an existing club with new data.
- * @param clubId - ID of the club to update
- * @param input - Club update data
+ * @param clubId ID of the club to update
+ * @param input Club update data
+ * @returns Updated club details
  * @throws ConvexError when club doesn't exist, user lacks permissions, or validation fails
  */
-export const updateClub = authenticatedMutationWithRLS()({
+export const updateClub = authenticatedMutation()({
   args: {
     clubId: zid("clubs"),
     input: clubUpdateInputSchema,
   },
+  returns: z.object(withSystemFields("clubs", clubSchema.shape)),
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "updateClub", ctx.currentUser._id + args.clubId);
-    const club = await getOrThrow(ctx, args.clubId);
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await enforceClubOwnershipOrAdmin(ctx, club);
     await validateClubUpdateInput(ctx, args.input, club);
 
-    await dtoUpdateClub(ctx, args.clubId, {
+    const updatedClub = await dtoUpdateClub(ctx, args.clubId, {
       ...args.input,
+      // If club is changed from private to public, then set its status to not approved
       isApproved: args.input.isPublic ? false : club.isApproved,
     });
-    await createClubActivity(
-      ctx,
-      args.clubId,
-      ctx.currentUser._id,
-      ACTIVITY_TYPES.CLUB_UPDATED,
-      getMetadata(club, args.input),
-    );
+
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.CLUB_UPDATED,
+      metadata: getMetadata(club, args.input),
+    });
+
+    return updatedClub;
   },
 });
 
 /**
  * Deletes an existing club along with all its related resources (memberships and events).
- * @param clubId - ID of the club to delete
+ * @param clubId ID of the club to delete
  * @throws ConvexError when club doesn't exist or user lacks permissions
  */
-export const deleteClub = authenticatedMutationWithRLS()({
+export const deleteClub = authenticatedMutation()({
   args: { clubId: zid("clubs") },
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.clubId);
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await enforceClubOwnershipOrAdmin(ctx, club);
-    await dtoDeleteAllClubMemberships(ctx, args.clubId);
-    await ctx.db.delete(args.clubId);
 
-    await createClubActivity(ctx, args.clubId, ctx.currentUser._id, ACTIVITY_TYPES.CLUB_DELETED, [
-      { previousValue: club.name },
-    ]);
+    // Related resources deletion is cascaded as specified in schema
+    await ctx.table("clubs").getX(args.clubId).delete();
+
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.CLUB_DELETED,
+      metadata: [{ previousValue: club.name }],
+    });
   },
 });
 
 /**
  * Updates a club membership. Only club owner, club admin, or system admin can modify memberships.
- * @param membershipId - ID of the membership to update
- * @param input - Membership update data
+ * @param membershipId ID of the membership to update
+ * @param input Membership update data
+ * @returns Updated membership details
  * @throws ConvexError when membership doesn't exist or user lacks permissions
  */
-export const updateClubMembership = authenticatedMutationWithRLS()({
+export const updateClubMembership = authenticatedMutation()({
   args: {
     membershipId: zid("clubMemberships"),
     input: clubMembershipUpdateInputSchema,
   },
+  returns: z.object(withSystemFields("clubMemberships", clubMembershipSchema.shape)),
   handler: async (ctx, args) => {
     await enforceRateLimit(ctx, "updateClubMembership", ctx.currentUser._id + args.membershipId);
-    const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await getOrThrow(ctx, membership.clubId);
+    const membership = await dtoGetClubMembershipOrThrow(ctx, args.membershipId);
+    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
-    await ctx.db.patch(args.membershipId, args.input);
-    await createClubActivity(
-      ctx,
-      club._id,
-      membership.userId,
-      ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
-      getMetadata(membership, args.input),
-    );
+    const updatedMembership = await dtoUpdateClubMembership(ctx, membership._id, args.input);
+
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: membership.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
+      metadata: getMetadata(membership, args.input),
+    });
+
+    return updatedMembership;
   },
 });
 
 /**
  * Removes a member from a club. Only club owner, club admin, or system admin can remove members.
- * @param membershipId - ID of the membership to remove
+ * @param membershipId ID of the membership to remove
  * @throws ConvexError when membership doesn't exist, user lacks permissions, or trying to remove club owner
  */
-export const removeClubMember = authenticatedMutationWithRLS()({
+export const removeClubMember = authenticatedMutation()({
   args: { membershipId: zid("clubMemberships") },
   handler: async (ctx, args) => {
-    const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await getOrThrow(ctx, membership.clubId);
+    const membership = await dtoGetClubMembershipOrThrow(ctx, args.membershipId);
+    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     if (isClubOwner(club, membership.userId)) {
       throw new ConvexError(CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR);
     }
 
-    await ctx.db.delete(args.membershipId);
-    await createClubActivity(
-      ctx,
-      club._id,
-      membership.userId,
-      ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
-      [{ previousValue: membership.name }],
-    );
-    await updateMemberCount(ctx, membership.clubId, -1);
+    await ctx.table("clubMemberships").getX(args.membershipId).delete();
+
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: membership.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+      metadata: [{ previousValue: membership.name }],
+    });
+
+    await updateClubMemberCount(ctx, club, -1);
   },
 });
 
 /**
  * Approves multiple pending club memberships. Only club owner, club admin, or system admin can approve.
- * @param membershipIds - Array of membership IDs to approve
+ * @param membershipIds Array of membership IDs to approve
  * @returns Number of memberships approved
  * @throws ConvexError when memberships don't exist or user lacks permissions
  */
-export const approveClubMemberships = authenticatedMutationWithRLS()({
+export const approveClubMemberships = authenticatedMutation()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
   returns: z.number(),
   handler: async (ctx, args) => {
@@ -403,20 +392,19 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
       return 0;
     }
 
-    const club = await getOrThrow(ctx, clubId);
+    const club = await dtoGetClubOrThrow(ctx, clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     let approvedCount = 0;
     for (const membership of memberships) {
       if (!membership.isApproved) {
-        await ctx.db.patch(membership._id, { isApproved: true });
-        await createClubActivity(
-          ctx,
-          membership.clubId,
-          membership.userId,
-          ACTIVITY_TYPES.CLUB_JOINED,
-          [{ newValue: membership.name }],
-        );
+        await ctx.table("clubMemberships").getX(membership._id).patch({ isApproved: true });
+        await dtoCreateActivity(ctx, {
+          resourceId: membership.clubId,
+          relatedId: membership.userId,
+          type: ACTIVITY_TYPES.CLUB_JOINED,
+          metadata: [{ newValue: membership.name }],
+        });
         approvedCount++;
       }
     }
@@ -426,11 +414,11 @@ export const approveClubMemberships = authenticatedMutationWithRLS()({
 
 /**
  * Removes multiple members from a club. Only club owner, club admin, or system admin can remove.
- * @param membershipIds - Array of membership IDs to remove
+ * @param membershipIds Array of membership IDs to remove
  * @returns Number of members removed
  * @throws ConvexError when memberships don't exist, user lacks permissions, or trying to remove club owner
  */
-export const bulkRemoveMembers = authenticatedMutationWithRLS()({
+export const removeMembers = authenticatedMutation()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
   returns: z.number(),
   handler: async (ctx, args) => {
@@ -439,7 +427,7 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
       return 0;
     }
 
-    const club = await getOrThrow(ctx, clubId);
+    const club = await dtoGetClubOrThrow(ctx, clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     const ownerMembership = memberships.find((m) => isClubOwner(club, m.userId));
@@ -448,19 +436,18 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
     }
 
     for (const membership of memberships) {
-      await ctx.db.delete(membership._id);
-      await createClubActivity(
-        ctx,
-        club._id,
-        membership.userId,
-        ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
-        [{ previousValue: membership.name }],
-      );
+      await ctx.table("clubMemberships").getX(membership._id).delete();
+      await dtoCreateActivity(ctx, {
+        resourceId: club._id,
+        relatedId: membership.userId,
+        type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+        metadata: [{ previousValue: membership.name }],
+      });
     }
 
     const removedCount = memberships.length;
     if (removedCount > 0 && club.numMembers >= removedCount) {
-      await dtoUpdateClub(ctx, club._id, { numMembers: club.numMembers - removedCount });
+      await updateClubMemberCount(ctx, club, -removedCount);
     }
 
     return removedCount;
@@ -470,29 +457,30 @@ export const bulkRemoveMembers = authenticatedMutationWithRLS()({
 /**
  * Bans a club member. Only club owner, club admin, or system admin can ban members.
  * Removes the membership and creates an active ban record.
- * @param membershipId - ID of the membership to ban
- * @param reason - Optional reason for the ban
+ * @param membershipId ID of the membership to ban
+ * @param reason Optional reason for the ban
  * @throws ConvexError when membership doesn't exist, user lacks permissions, trying to ban owner, or trying to ban self
  */
-export const banClubMember = authenticatedMutationWithRLS()({
+export const banAndRemoveClubMember = authenticatedMutation()({
   args: {
     membershipId: zid("clubMemberships"),
     reason: clubBanReasonSchema,
   },
   handler: async (ctx, args) => {
-    const membership = validateMembershipExists(await ctx.db.get(args.membershipId));
-    const club = await getOrThrow(ctx, membership.clubId);
+    const membership = await dtoGetClubMembershipOrThrow(ctx, args.membershipId);
+    const club = await dtoGetClubOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     if (isClubOwner(club, membership.userId)) {
       throw new ConvexError(CLUB_CANNOT_BAN_OWNER_ERROR);
     }
+
     if (membership.userId === ctx.currentUser._id) {
       throw new ConvexError(CLUB_CANNOT_BAN_SELF_ERROR);
     }
 
-    await ctx.db.delete(args.membershipId);
-    await ctx.db.insert("clubBans", {
+    await ctx.table("clubMemberships").getX(args.membershipId).delete();
+    await ctx.table("clubBans").insert({
       clubId: membership.clubId,
       userId: membership.userId,
       bannedBy: ctx.currentUser._id,
@@ -501,27 +489,30 @@ export const banClubMember = authenticatedMutationWithRLS()({
       isActive: true,
     });
 
-    await updateMemberCount(ctx, membership.clubId, -1);
-    await createClubActivity(ctx, club._id, membership.userId, ACTIVITY_TYPES.CLUB_MEMBER_BANNED, [
-      { newValue: args.reason },
-    ]);
+    await updateClubMemberCount(ctx, club, -1);
+    await dtoCreateActivity(ctx, {
+      resourceId: club._id,
+      relatedId: membership.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBER_BANNED,
+      metadata: [{ newValue: args.reason }],
+    });
   },
 });
 
 /**
- * Unbans a club member. Only club owner, club admin, or system admin can unban members.
+ * Unbans a user from a club. Only club owner, club admin, or system admin can unban users.
  * Deactivates the ban record allowing the user to rejoin.
- * @param clubId - ID of the club
- * @param userId - ID of the user to unban
+ * @param clubId ID of the club
+ * @param userId ID of the user to unban
  * @throws ConvexError when club doesn't exist, user lacks permissions, or user is not banned
  */
-export const unbanClubMember = authenticatedMutationWithRLS()({
+export const unbanUserFromClub = authenticatedMutation()({
   args: {
     clubId: zid("clubs"),
     userId: zid("users"),
   },
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.clubId);
+    const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
     const ban = await dtoGetClubBanRecordForUser(ctx, args.clubId, args.userId);
@@ -529,128 +520,13 @@ export const unbanClubMember = authenticatedMutationWithRLS()({
       throw new ConvexError(CLUB_USER_NOT_BANNED_ERROR);
     }
 
-    await ctx.db.patch(ban._id, { isActive: false });
-    await createClubActivity(ctx, args.clubId, args.userId, ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED, [
-      { previousValue: ban.reason },
-    ]);
+    await ctx.table("clubBans").getX(ban._id).patch({ isActive: false });
+
+    await dtoCreateActivity(ctx, {
+      resourceId: args.clubId,
+      relatedId: args.userId,
+      type: ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED,
+      metadata: [{ previousValue: ban.reason }],
+    });
   },
 });
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Creates an activity record for club-related actions.
- * @param ctx - Authenticated context with profile
- * @param resourceId - ID of the club resource
- * @param relatedId - ID of the user related to the activity
- * @param type - Type of activity from ACTIVITY_TYPES
- * @param metadata - Optional metadata for the activity
- */
-const createClubActivity = async (
-  ctx: AuthenticatedWithProfileCtx,
-  resourceId: Id<"clubs">,
-  relatedId: Id<"users">,
-  type: string,
-  metadata?: ActivityMetadata,
-) => {
-  await dtoCreateActivity(ctx, {
-    resourceId,
-    relatedId,
-    type,
-    createdBy: ctx.currentUser._id,
-    metadata,
-  });
-};
-
-/**
- * Updates the member count for a club by a given delta.
- * @param ctx - Mutation context
- * @param clubId - ID of the club to update
- * @param delta - Change in member count (positive or negative)
- */
-const updateMemberCount = async (ctx: MutationCtx, clubId: Id<"clubs">, delta: number) => {
-  const club = await getOrThrow(ctx, clubId);
-  const newCount = Math.max(0, club.numMembers + delta);
-  if (newCount !== club.numMembers) {
-    await dtoUpdateClub(ctx, clubId, { numMembers: newCount });
-  }
-};
-
-/**
- * Checks if a user is the owner of a club.
- * @param club - The club to check
- * @param userId - ID of the user to check
- * @returns True if the user is the club owner
- */
-const isClubOwner = (club: Club, userId: Id<"users">): boolean => {
-  return club.createdBy === userId;
-};
-
-/**
- * Adds the current authenticated user to a club with specified options and updates member count.
- * @param ctx - Authenticated context with profile
- * @param clubId - ID of the club to join
- * @param options - Join options including admin status, approval status and membership info
- * @returns Object containing membership info and membership ID
- * @throws ConvexError when club doesn't exist or user is already a member
- */
-const addCurrentUserToClub = async (
-  ctx: AuthenticatedWithProfileCtx,
-  clubId: Id<"clubs">,
-  options?: AddUserToClubOptions,
-): Promise<{
-  membershipInfo: WithoutSystemFields<ClubMembership>;
-  membershipId: Id<"clubMemberships">;
-}> => {
-  const club = await getOrThrow(ctx, clubId);
-
-  const existingMembership = await ctx.db
-    .query("clubMemberships")
-    .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", ctx.currentUser._id))
-    .unique();
-
-  if (existingMembership) {
-    throw new ConvexError(CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR);
-  }
-
-  const currentUserMembershipInfo = {
-    ...createClubMembershipInfo(ctx.currentUser, clubId, options?.membershipInfo),
-    isApproved: options?.isAdmin ? true : !!options?.isApproved,
-    isClubAdmin: !!options?.isAdmin,
-    joinedAt: Date.now(),
-  };
-
-  const membershipId = await ctx.db.insert("clubMemberships", currentUserMembershipInfo);
-  await dtoUpdateClub(ctx, clubId, { numMembers: club.numMembers + 1 });
-
-  return { membershipInfo: currentUserMembershipInfo, membershipId };
-};
-
-/**
- * Creates club membership information.
- * If membership info is not provided, use current user's profile values.
- * @param currentUser - Authenticated user with profile details
- * @param clubId - ID of the club to create membership for
- * @param membershipInfo - Optional membership details to override profile defaults
- * @returns Complete club membership object with defaults applied
- */
-const createClubMembershipInfo = (
-  currentUser: UserDetailsWithProfile,
-  clubId: Id<"clubs">,
-  membershipInfo?: ClubMembershipInput,
-): WithoutSystemFields<ClubMembership> => {
-  const { name, gender, skillLevel, preferredPlayStyle } = membershipInfo || {};
-  return {
-    clubId,
-    userId: currentUser._id,
-    name: name || `${currentUser.profile.firstName} ${currentUser.profile.lastName}`,
-    gender: gender || currentUser.profile.gender,
-    skillLevel: skillLevel || currentUser.profile.skillLevel,
-    preferredPlayStyle: preferredPlayStyle || currentUser.profile.preferredPlayStyle,
-    isApproved: false,
-    isClubAdmin: false,
-    joinedAt: Date.now(),
-  };
-};

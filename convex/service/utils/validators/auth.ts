@@ -1,5 +1,4 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   AUTH_UNAUTHENTICATED_ERROR,
@@ -7,6 +6,7 @@ import {
 } from "@/convex/constants/errors";
 import { getCurrentUser } from "@/convex/service/users/database";
 import { UserDetails } from "@/convex/service/users/schemas";
+import { QueryCtx } from "@/convex/types";
 import { ConvexError } from "convex/values";
 
 /**

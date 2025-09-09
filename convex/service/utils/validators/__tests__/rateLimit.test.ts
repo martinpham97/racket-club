@@ -1,20 +1,13 @@
 import { MutationCtx } from "@/convex/_generated/server";
 import { rateLimiter } from "@/convex/service/utils/rateLimit";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
-import { createMockCtx } from "@/test-utils/mocks/ctx";
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../rateLimit");
-vi.mock("date-fns", () => ({
-  formatDistance: vi.fn(() => "5 minutes"),
-}));
-vi.mock("string-template", () => ({
-  default: vi.fn((template, data) => template.replace("{retryAfter}", data.retryAfter)),
-}));
+vi.mock("@/convex/service/utils/rateLimit");
 
 describe("enforceRateLimit", () => {
-  const mockCtx: MutationCtx = createMockCtx();
+  const mockCtx: MutationCtx = {} as MutationCtx;
 
   it("passes when rate limit is not exceeded", async () => {
     vi.mocked(rateLimiter.limit).mockResolvedValue({

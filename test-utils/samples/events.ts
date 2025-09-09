@@ -7,7 +7,6 @@ import {
   PAYMENT_TYPE,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
-import schema from "@/convex/schema";
 import {
   Event,
   EventCreateInput,
@@ -17,7 +16,7 @@ import {
   Timeslot,
   TimeslotInput,
 } from "@/convex/service/events/schemas";
-import { TestConvex } from "convex-test";
+import { convexTest } from "@/convex/setup.testing";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
 
@@ -199,47 +198,45 @@ export const createTestEventParticipantRecord = (
 });
 
 export class EventTestHelpers {
-  constructor(private t: TestConvex<typeof schema>) {}
+  constructor(private t: ReturnType<typeof convexTest>) {}
 
   async insertEventSeries(eventSeries: WithoutSystemFields<EventSeries>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("eventSeries", eventSeries);
-    });
+    return await this.t.runWithCtx((ctx) => ctx.table("eventSeries").insert(eventSeries).get());
   }
 
   async insertEvent(event: WithoutSystemFields<Event>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("events", event);
-    });
+    return await this.t.runWithCtx((ctx) => ctx.table("events").insert(event).get());
   }
 
   async insertEventParticipant(participant: WithoutSystemFields<EventParticipant>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("eventParticipants", participant);
-    });
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("eventParticipants").insert(participant).get(),
+    );
   }
 
   async getEventSeries(eventSeriesId: Id<"eventSeries">) {
-    return await this.t.run(async (ctx) => ctx.db.get(eventSeriesId));
+    return await this.t.runWithCtx((ctx) => ctx.table("eventSeries").get(eventSeriesId));
   }
 
   async getEvent(eventId: Id<"events">) {
-    return await this.t.run(async (ctx) => ctx.db.get(eventId));
+    return await this.t.runWithCtx((ctx) => ctx.table("events").get(eventId));
   }
 
   async getEventParticipant(participantId: Id<"eventParticipants">) {
-    return await this.t.run(async (ctx) => ctx.db.get(participantId));
+    return await this.t.runWithCtx((ctx) => ctx.table("eventParticipants").get(participantId));
   }
 
   async deleteEventSeries(eventSeriesId: Id<"eventSeries">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(eventSeriesId));
+    return await this.t.runWithCtx((ctx) => ctx.table("eventSeries").getX(eventSeriesId).delete());
   }
 
   async deleteEvent(eventId: Id<"events">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(eventId));
+    return await this.t.runWithCtx((ctx) => ctx.table("events").getX(eventId).delete());
   }
 
   async deleteEventParticipant(participantId: Id<"eventParticipants">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(participantId));
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("eventParticipants").getX(participantId).delete(),
+    );
   }
 }

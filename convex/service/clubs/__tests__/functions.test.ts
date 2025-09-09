@@ -17,6 +17,8 @@ import {
   CLUB_USER_NOT_BANNED_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
+import { Activity } from "@/convex/service/activities/schemas";
+import { convexTest } from "@/convex/setup.testing";
 import { ActivityTestHelpers, createTestActivity } from "@/test-utils/samples/activities";
 import {
   ClubTestHelpers,
@@ -26,9 +28,7 @@ import {
   createTestClubMembership,
 } from "@/test-utils/samples/clubs";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
-import { convexTest } from "convex-test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Activity } from "../../activities/schemas";
 
 vi.mock("@/convex/service/utils/validators/rateLimit", () => ({
   enforceRateLimit: vi.fn(),
@@ -49,7 +49,8 @@ describe("Club Functions", () => {
 
   describe("listPublicClubs", () => {
     it("returns public approved clubs", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const clubApproved = createTestClub(userId, { isPublic: true, isApproved: true });
       const club = createTestClub(userId, { isPublic: true, isApproved: false });
       await clubHelpers.insertClub(clubApproved);
@@ -64,7 +65,8 @@ describe("Club Functions", () => {
     });
 
     it("excludes private or unapproved clubs", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
       await clubHelpers.insertClub(createTestClub(userId, { isApproved: false }));
 
@@ -78,14 +80,17 @@ describe("Club Functions", () => {
 
   describe("listClubsForUser", () => {
     it("returns user's clubs with membership details", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
-      const membership = createTestClubMembership(clubId, userId, { name: "Test User" });
-      await clubHelpers.insertMembership(membership);
+      const membership = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, userId, { name: "Test User" }),
+      );
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.query(api.service.clubs.functions.listClubsForUser, {
@@ -96,19 +101,22 @@ describe("Club Functions", () => {
       expect(result.page).toHaveLength(1);
       expect(result.page[0]).toEqual(
         expect.objectContaining({
-          ...club,
+          ...clubRecord,
           membership: expect.objectContaining(membership),
         }),
       );
     });
 
     it("returns empty array if user has no clubs", async () => {
-      const userId = await userHelpers.insertUser();
-      const otherUserId = await userHelpers.insertUser("other@test.com");
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const otherUser = await userHelpers.insertUser("other@test.com");
+      const otherUserId = otherUser._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { name: "Test User" });
       await clubHelpers.insertMembership(membership);
@@ -125,9 +133,11 @@ describe("Club Functions", () => {
 
   describe("getClub", () => {
     it("returns club details", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const result = await t.query(api.service.clubs.functions.getClub, { clubId });
 
@@ -143,17 +153,18 @@ describe("Club Functions", () => {
     });
   });
 
-  describe("joinClub", () => {
-    it("allows user to join club", async () => {
-      const userId = await userHelpers.insertUser();
+  describe("requestToJoinClub", () => {
+    it("allows user to request to join club", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
-      const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
       await clubHelpers.approveClub(clubId);
 
       const membershipInfo = { name: "Test Member" };
       const asUser = t.withIdentity({ subject: userId });
-      const result = await asUser.mutation(api.service.clubs.functions.joinClub, {
+      const result = await asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
         clubId,
         membershipInfo,
       });
@@ -174,20 +185,22 @@ describe("Club Functions", () => {
       const activities = await activityHelpers.getActivitiesForResource(clubId);
       const joinActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_JOIN_REQUEST);
       expect(joinActivity).toBeDefined();
-      expect(joinActivity?.createdBy).toBe(userId);
       expect(joinActivity?.resourceId).toBe(clubId);
       expect(joinActivity?.relatedId).toEqual(userId);
     });
 
     it("banned user cannot join", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const bannedUser = await userHelpers.insertUser("banned@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const bannedUserObj = await userHelpers.insertUser("banned@example.com");
+      const bannedUser = bannedUserObj._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(bannedUser));
 
-      const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
+      const club = createTestClub(owner, { isApproved: true });
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: owner,
@@ -201,18 +214,20 @@ describe("Club Functions", () => {
 
       const asBannedUser = t.withIdentity({ subject: bannedUser });
       await expect(
-        asBannedUser.mutation(api.service.clubs.functions.joinClub, {
+        asBannedUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
         }),
       ).rejects.toThrow(CLUB_USER_BANNED_ERROR);
     });
 
     it("throws when user already member", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.approveClub(clubId);
 
       const membership = createTestClubMembership(clubId, userId, { name: "Existing Member" });
@@ -220,7 +235,7 @@ describe("Club Functions", () => {
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test" },
         }),
@@ -228,14 +243,16 @@ describe("Club Functions", () => {
     });
 
     it("throws when club is at max capacity", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
-      const club = createTestClub(userId, { maxMembers: 1, numMembers: 1 });
-      const clubId = await clubHelpers.insertClub(club);
+      const club = createTestClub(userId, { maxMembers: 1, numMembers: 1, isApproved: true });
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test" },
         }),
@@ -243,14 +260,16 @@ describe("Club Functions", () => {
     });
 
     it("throws when trying to join public unapproved club", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: true, isApproved: false });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test" },
         }),
@@ -258,14 +277,16 @@ describe("Club Functions", () => {
     });
 
     it("handles member count correctly when club is at zero", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { numMembers: 0 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.approveClub(clubId);
 
       const asUser = t.withIdentity({ subject: userId });
-      await asUser.mutation(api.service.clubs.functions.joinClub, {
+      await asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
         clubId,
         membershipInfo: { name: "Test" },
       });
@@ -275,14 +296,16 @@ describe("Club Functions", () => {
     });
 
     it("allows joining public approved club", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: true, isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test" },
         }),
@@ -290,14 +313,16 @@ describe("Club Functions", () => {
     });
 
     it("allows joining private unapproved club", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: false, isApproved: false });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test" },
         }),
@@ -305,18 +330,21 @@ describe("Club Functions", () => {
     });
 
     it("throws when club is at max capacity", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
-      const club = createTestClub(ownerId, { maxMembers: 1, numMembers: 1 });
-      const clubId = await clubHelpers.insertClub(club);
+      const club = createTestClub(ownerId, { maxMembers: 1, numMembers: 1, isApproved: true });
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test User" },
         }),
@@ -324,21 +352,24 @@ describe("Club Functions", () => {
     });
 
     it("throws when user already has membership", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId, { isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
       await clubHelpers.insertMembership(membership);
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
-        asUser.mutation(api.service.clubs.functions.joinClub, {
+        asUser.mutation(api.service.clubs.functions.requestToJoinClub, {
           clubId,
           membershipInfo: { name: "Test User" },
         }),
@@ -348,15 +379,19 @@ describe("Club Functions", () => {
 
   describe("leaveClub", () => {
     it("allows user to leave club", async () => {
-      const ownerUserId = await userHelpers.insertUser();
-      const userId = await userHelpers.insertUser();
+      const ownerUser = await userHelpers.insertUser();
+      const ownerUserId = ownerUser._id;
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(ownerUserId, { numMembers: 1 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { name: "Test Member" });
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await asUser.mutation(api.service.clubs.functions.leaveClub, { clubId });
@@ -370,18 +405,20 @@ describe("Club Functions", () => {
       const activities = await activityHelpers.getActivitiesForResource(clubId);
       const leaveActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_LEFT);
       expect(leaveActivity).toBeDefined();
-      expect(leaveActivity?.createdBy).toBe(userId);
       expect(leaveActivity?.resourceId).toBe(clubId);
       expect(leaveActivity?.relatedId).toEqual(userId);
     });
 
     it("throws when user not a member", async () => {
-      const ownerUserId = await userHelpers.insertUser();
-      const userId = await userHelpers.insertUser();
+      const ownerUser = await userHelpers.insertUser();
+      const ownerUserId = ownerUser._id;
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(ownerUserId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
@@ -390,11 +427,13 @@ describe("Club Functions", () => {
     });
 
     it("throws when club owner tries to leave", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId, { numMembers: 1 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { isClubAdmin: true });
       await clubHelpers.insertMembership(membership);
@@ -406,14 +445,17 @@ describe("Club Functions", () => {
     });
 
     it("throws when non-member tries to leave", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("outsider@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("outsider@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
@@ -422,11 +464,14 @@ describe("Club Functions", () => {
     });
 
     it("handles member count correctly when already at zero", async () => {
-      const ownerUserId = await userHelpers.insertUser();
-      const userId = await userHelpers.insertUser();
+      const ownerUser = await userHelpers.insertUser();
+      const ownerUserId = ownerUser._id;
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(ownerUserId, { numMembers: 0 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
       await clubHelpers.insertMembership(membership);
@@ -441,7 +486,8 @@ describe("Club Functions", () => {
 
   describe("createClub", () => {
     it("creates club and adds creator as admin", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId, {
         gender: "M",
         preferredPlayStyle: "MD",
@@ -455,9 +501,9 @@ describe("Club Functions", () => {
       };
 
       const asUser = t.withIdentity({ subject: userId });
-      const clubId = await asUser.mutation(api.service.clubs.functions.createClub, input);
+      const club = await asUser.mutation(api.service.clubs.functions.createClub, input);
+      const clubId = club._id;
 
-      const club = await clubHelpers.getClubRecord(clubId);
       expect(club).toEqual(
         expect.objectContaining({
           createdBy: userId,
@@ -485,22 +531,22 @@ describe("Club Functions", () => {
       expect(activities[1]).toEqual(
         expect.objectContaining({
           resourceId: clubId,
+          relatedId: userId,
           type: ACTIVITY_TYPES.CLUB_CREATED,
-          createdBy: userId,
         }),
       );
       expect(activities[0]).toEqual(
         expect.objectContaining({
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
-          createdBy: userId,
           relatedId: userId,
         }),
       );
     });
 
     it("creates club without membership info", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId, {
         gender: "M",
         preferredPlayStyle: "MD",
@@ -510,9 +556,9 @@ describe("Club Functions", () => {
 
       const input = createTestClubInput();
       const asUser = t.withIdentity({ subject: userId });
-      const clubId = await asUser.mutation(api.service.clubs.functions.createClub, { input });
+      const club = await asUser.mutation(api.service.clubs.functions.createClub, { input });
+      const clubId = club._id;
 
-      const club = await clubHelpers.getClubRecord(clubId);
       expect(club).toEqual(
         expect.objectContaining({
           createdBy: userId,
@@ -540,21 +586,20 @@ describe("Club Functions", () => {
         expect.objectContaining({
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_CREATED,
-          createdBy: userId,
         }),
       );
       expect(activities[0]).toEqual(
         expect.objectContaining({
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
-          createdBy: userId,
           relatedId: userId,
         }),
       );
     });
 
     it("throws when public club name already exists", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const existingClub = createTestClub(userId, { isPublic: true, name: "Duplicate Club" });
@@ -568,7 +613,8 @@ describe("Club Functions", () => {
     });
 
     it("allows duplicate names for private clubs", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const existingClub = createTestClub(userId, { isPublic: false, name: "Duplicate Club" });
@@ -582,7 +628,8 @@ describe("Club Functions", () => {
     });
 
     it("allows skill level min = max", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const input = createTestClubInput({ skillLevels: { min: 3, max: 3 } });
@@ -593,7 +640,8 @@ describe("Club Functions", () => {
     });
 
     it("allows private club with same name as existing private club", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const existingClub = createTestClub(userId, { isPublic: false, name: "Private Club" });
@@ -609,11 +657,13 @@ describe("Club Functions", () => {
 
   describe("updateClub", () => {
     it("allows club owner to update", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId, { name: "Default club name" });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { name: "Updated Club Name" };
       const asUser = t.withIdentity({ subject: userId });
@@ -626,7 +676,7 @@ describe("Club Functions", () => {
       const activities = await activityHelpers.getActivitiesForResource(clubId);
       const updateActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_UPDATED);
       expect(updateActivity).toBeDefined();
-      expect(updateActivity?.createdBy).toBe(userId);
+      expect(updateActivity?.relatedId).toBe(userId);
       expect(updateActivity?.resourceId).toBe(clubId);
       expect(updateActivity?.metadata).toContainEqual({
         previousValue: "Default club name",
@@ -636,13 +686,16 @@ describe("Club Functions", () => {
     });
 
     it("allows club admin to update", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("admin@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("admin@example.com");
+      const userId = userObj._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, {
         name: "Club Admin",
@@ -659,13 +712,16 @@ describe("Club Functions", () => {
     });
 
     it("denies access to non-admin members", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, {
         name: "Regular Member",
@@ -680,7 +736,8 @@ describe("Club Functions", () => {
     });
 
     it("throws when updating name to duplicate public club name", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
@@ -688,7 +745,8 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(existingClub);
 
       const club = createTestClub(userId, { isPublic: true, name: "My Club" });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { name: "Existing Public Club" };
       const asUser = t.withIdentity({ subject: userId });
@@ -698,7 +756,8 @@ describe("Club Functions", () => {
     });
 
     it("allows updating name when changing from public to private", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
@@ -706,7 +765,8 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(existingClub);
 
       const club = createTestClub(userId, { isPublic: true, name: "My Club" });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { name: "Duplicate Name", isPublic: false };
       const asUser = t.withIdentity({ subject: userId });
@@ -716,11 +776,13 @@ describe("Club Functions", () => {
     });
 
     it("allows updating skill levels with min = max", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { skillLevels: { min: 3, max: 3 } };
       const asUser = t.withIdentity({ subject: userId });
@@ -730,7 +792,8 @@ describe("Club Functions", () => {
     });
 
     it("validates name correctly when only changing isPublic flag", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
@@ -738,7 +801,8 @@ describe("Club Functions", () => {
       await clubHelpers.insertClub(existingClub);
 
       const club = createTestClub(userId, { isPublic: false, name: "Test Club" });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { isPublic: true };
       const asUser = t.withIdentity({ subject: userId });
@@ -748,10 +812,12 @@ describe("Club Functions", () => {
     });
 
     it("throws when non-admin tries to update isApproved", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { isApproved: true };
       const asUser = t.withIdentity({ subject: userId });
@@ -761,12 +827,15 @@ describe("Club Functions", () => {
     });
 
     it("allows admin to update isApproved", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
-      const adminId = await userHelpers.insertUser("admin@example.com");
+      const adminUser = await userHelpers.insertUser("admin@example.com");
+      const adminId = adminUser._id;
       await userHelpers.insertProfile(createTestProfile(adminId, { isAdmin: true }));
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { isApproved: true };
       const asAdmin = t.withIdentity({ subject: adminId });
@@ -776,13 +845,16 @@ describe("Club Functions", () => {
     });
 
     it("denies access for non-system-admin to modify approval status", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("admin@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("admin@example.com");
+      const userId = userObj._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, {
         name: "Club Admin",
@@ -798,10 +870,12 @@ describe("Club Functions", () => {
     });
 
     it("sets isApproved to false when changing to public", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: false, isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { isPublic: true };
       const asUser = t.withIdentity({ subject: userId });
@@ -813,10 +887,12 @@ describe("Club Functions", () => {
     });
 
     it("preserves isApproved when changing to private", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: true, isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { isPublic: false };
       const asUser = t.withIdentity({ subject: userId });
@@ -828,10 +904,12 @@ describe("Club Functions", () => {
     });
 
     it("preserves isApproved when staying private", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId, { isPublic: false, isApproved: true });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const input = { name: "Updated Name" };
       const asUser = t.withIdentity({ subject: userId });
@@ -844,11 +922,13 @@ describe("Club Functions", () => {
 
   describe("deleteClub", () => {
     it("allows club owner to delete", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await asUser.mutation(api.service.clubs.functions.deleteClub, { clubId });
@@ -863,19 +943,22 @@ describe("Club Functions", () => {
         expect.objectContaining({
           resourceId: clubId,
           type: ACTIVITY_TYPES.CLUB_DELETED,
-          createdBy: userId,
+          relatedId: userId,
         }),
       );
     });
 
     it("denies access to non-owners", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("other@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("other@example.com");
+      const userId = userObj._id;
       const profile = createTestProfile(userId);
       await userHelpers.insertProfile(profile);
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
@@ -886,16 +969,20 @@ describe("Club Functions", () => {
 
   describe("updateClubMembership", () => {
     it("allows club owner to update membership", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { isApproved: false });
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: ownerId });
       await asOwner.mutation(api.service.clubs.functions.updateClubMembership, {
@@ -918,24 +1005,28 @@ describe("Club Functions", () => {
         (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
       );
       expect(updateActivity).toBeDefined();
-      expect(updateActivity?.createdBy).toBe(ownerId);
       expect(updateActivity?.resourceId).toBe(clubId);
       expect(updateActivity?.relatedId).toEqual(userId);
     });
 
     it("allows system admin to update any membership", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const adminId = await userHelpers.insertUser("admin@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const adminUser = await userHelpers.insertUser("admin@example.com");
+      const adminId = adminUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(adminId, { isAdmin: true }));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asAdmin = t.withIdentity({ subject: adminId });
       await expect(
@@ -947,17 +1038,21 @@ describe("Club Functions", () => {
     });
 
     it("denies access to regular members", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asMember = t.withIdentity({ subject: userId });
       await expect(
@@ -969,14 +1064,17 @@ describe("Club Functions", () => {
     });
 
     it("throws when membership not found", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       await clubHelpers.deleteClubMembership(membershipId);
 
@@ -991,14 +1089,17 @@ describe("Club Functions", () => {
     });
 
     it("allows owner to update their own membership", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { isClubAdmin: true });
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await asUser.mutation(api.service.clubs.functions.updateClubMembership, {
@@ -1011,16 +1112,20 @@ describe("Club Functions", () => {
     });
 
     it("validates membership state transitions", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId, { isApproved: false });
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: ownerId });
       await asOwner.mutation(api.service.clubs.functions.updateClubMembership, {
@@ -1034,16 +1139,20 @@ describe("Club Functions", () => {
     });
 
     it("handles empty membership input gracefully", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: ownerId });
       await expect(
@@ -1057,16 +1166,20 @@ describe("Club Functions", () => {
 
   describe("removeClubMember", () => {
     it("allows club owner to remove member", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
 
       const club = createTestClub(ownerId, { numMembers: 2 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: ownerId });
       await asOwner.mutation(api.service.clubs.functions.removeClubMember, {
@@ -1085,20 +1198,22 @@ describe("Club Functions", () => {
         (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       );
       expect(removeActivity).toBeDefined();
-      expect(removeActivity?.createdBy).toBe(ownerId);
       expect(removeActivity?.resourceId).toBe(clubId);
       expect(removeActivity?.relatedId).toEqual(userId);
     });
 
     it("prevents removing club owner", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
       await userHelpers.insertProfile(createTestProfile(ownerId, { isAdmin: true }));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const ownerMembership = createTestClubMembership(clubId, ownerId, { isClubAdmin: true });
-      const membershipId = await clubHelpers.insertMembership(ownerMembership);
+      const membershipRecord = await clubHelpers.insertMembership(ownerMembership);
+      const membershipId = membershipRecord._id;
 
       const asAdmin = t.withIdentity({ subject: ownerId });
       await expect(
@@ -1109,17 +1224,21 @@ describe("Club Functions", () => {
     });
 
     it("denies access to regular members", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asMember = t.withIdentity({ subject: userId });
       await expect(
@@ -1130,19 +1249,23 @@ describe("Club Functions", () => {
     });
 
     it("throws when trying to remove club owner", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const adminId = await userHelpers.insertUser("admin@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const adminUser = await userHelpers.insertUser("admin@example.com");
+      const adminId = adminUser._id;
 
       await userHelpers.insertProfile(createTestProfile(ownerId));
       await userHelpers.insertProfile(createTestProfile(adminId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const ownerMembership = createTestClubMembership(clubId, ownerId, { isClubAdmin: true });
       const adminMembership = createTestClubMembership(clubId, adminId, { isClubAdmin: true });
 
-      const ownerMembershipId = await clubHelpers.insertMembership(ownerMembership);
+      const ownerMembershipRecord = await clubHelpers.insertMembership(ownerMembership);
+      const ownerMembershipId = ownerMembershipRecord._id;
       await clubHelpers.insertMembership(adminMembership);
 
       const asAdmin = t.withIdentity({ subject: adminId });
@@ -1154,14 +1277,17 @@ describe("Club Functions", () => {
     });
 
     it("throws when membership not found", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
       await clubHelpers.deleteClubMembership(membershipId);
 
       const asUser = t.withIdentity({ subject: userId });
@@ -1173,15 +1299,19 @@ describe("Club Functions", () => {
     });
 
     it("handles member count correctly when already at zero", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("member@example.com");
+      const userId = userObj._id;
       await userHelpers.insertProfile(createTestProfile(ownerId));
 
       const club = createTestClub(ownerId, { numMembers: 0 });
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
-      const membershipId = await clubHelpers.insertMembership(membership);
+      const membershipRecord = await clubHelpers.insertMembership(membership);
+      const membershipId = membershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: ownerId });
       await asOwner.mutation(api.service.clubs.functions.removeClubMember, {
@@ -1195,17 +1325,25 @@ describe("Club Functions", () => {
 
   describe("listClubActivities", () => {
     it("returns activities when user is club member", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const membership = createTestClubMembership(clubId, userId);
       await clubHelpers.insertMembership(membership);
 
       // Create test activities
-      const activity1 = createTestActivity(clubId, userId, { type: ACTIVITY_TYPES.CLUB_CREATED });
-      const activity2 = createTestActivity(clubId, userId, { type: ACTIVITY_TYPES.CLUB_UPDATED });
+      const activity1 = createTestActivity(clubId, {
+        type: ACTIVITY_TYPES.CLUB_CREATED,
+        createdBy: userId,
+      });
+      const activity2 = createTestActivity(clubId, {
+        type: ACTIVITY_TYPES.CLUB_UPDATED,
+        createdBy: userId,
+      });
       await activityHelpers.insertActivity(activity1);
       await activityHelpers.insertActivity(activity2);
 
@@ -1228,10 +1366,12 @@ describe("Club Functions", () => {
     });
 
     it("throws error when club does not exist", async () => {
-      const userId = await userHelpers.insertUser();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
       const club = createTestClub(userId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.deleteClub(clubId);
 
       const asUser = t.withIdentity({ subject: userId });
@@ -1244,12 +1384,15 @@ describe("Club Functions", () => {
     });
 
     it("throws error when user is not club member", async () => {
-      const ownerId = await userHelpers.insertUser("owner@example.com");
-      const userId = await userHelpers.insertUser("user@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const ownerId = ownerUser._id;
+      const userObj = await userHelpers.insertUser("user@example.com");
+      const userId = userObj._id;
       await userHelpers.insertProfile(createTestProfile(userId));
 
       const club = createTestClub(ownerId);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
 
       const asUser = t.withIdentity({ subject: userId });
       await expect(
@@ -1261,16 +1404,19 @@ describe("Club Functions", () => {
     });
   });
 
-  describe("banClubMember", () => {
+  describe("banAndRemoveClubMember", () => {
     it("successfully bans a member", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const member = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const memberUser = await userHelpers.insertUser("member@example.com");
+      const member = memberUser._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(member));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: owner,
@@ -1279,7 +1425,7 @@ describe("Club Functions", () => {
         isClubAdmin: true,
         joinedAt: Date.now(),
       });
-      const memberMembership = await clubHelpers.insertMembership({
+      const memberMembershipRecord = await clubHelpers.insertMembership({
         clubId,
         userId: member,
         name: "Member",
@@ -1287,9 +1433,10 @@ describe("Club Functions", () => {
         isClubAdmin: false,
         joinedAt: Date.now(),
       });
+      const memberMembership = memberMembershipRecord._id;
 
       const asOwner = t.withIdentity({ subject: owner });
-      await asOwner.mutation(api.service.clubs.functions.banClubMember, {
+      await asOwner.mutation(api.service.clubs.functions.banAndRemoveClubMember, {
         membershipId: memberMembership,
         reason: "Inappropriate behavior",
       });
@@ -1310,15 +1457,18 @@ describe("Club Functions", () => {
     });
 
     it("cannot ban club owner", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const admin = await userHelpers.insertUser("admin@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const adminUser = await userHelpers.insertUser("admin@example.com");
+      const admin = adminUser._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(admin));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
-      const ownerMembership = await clubHelpers.insertMembership({
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
+      const ownerMembershipRecord = await clubHelpers.insertMembership({
         clubId,
         userId: owner,
         name: "Owner",
@@ -1326,6 +1476,7 @@ describe("Club Functions", () => {
         isClubAdmin: true,
         joinedAt: Date.now(),
       });
+      const ownerMembership = ownerMembershipRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: admin,
@@ -1337,7 +1488,7 @@ describe("Club Functions", () => {
 
       const asAdmin = t.withIdentity({ subject: admin });
       await expect(
-        asAdmin.mutation(api.service.clubs.functions.banClubMember, {
+        asAdmin.mutation(api.service.clubs.functions.banAndRemoveClubMember, {
           membershipId: ownerMembership,
           reason: "Test ban reason",
         }),
@@ -1345,15 +1496,18 @@ describe("Club Functions", () => {
     });
 
     it("cannot ban self", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const member = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const memberUser = await userHelpers.insertUser("member@example.com");
+      const member = memberUser._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(member));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
-      const memberMembership = await clubHelpers.insertMembership({
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
+      const memberMembershipRecord = await clubHelpers.insertMembership({
         clubId,
         userId: member,
         name: "Member",
@@ -1361,10 +1515,11 @@ describe("Club Functions", () => {
         isClubAdmin: true,
         joinedAt: Date.now(),
       });
+      const memberMembership = memberMembershipRecord._id;
 
       const asMember = t.withIdentity({ subject: member });
       await expect(
-        asMember.mutation(api.service.clubs.functions.banClubMember, {
+        asMember.mutation(api.service.clubs.functions.banAndRemoveClubMember, {
           membershipId: memberMembership,
           reason: "Test ban reason",
         }),
@@ -1372,12 +1527,14 @@ describe("Club Functions", () => {
     });
 
     it("throws when membership not found", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
       await userHelpers.insertProfile(createTestProfile(owner));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
-      const membershipId = await clubHelpers.insertMembership({
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
+      const membershipRecord = await clubHelpers.insertMembership({
         clubId,
         userId: owner,
         name: "Owner",
@@ -1385,11 +1542,12 @@ describe("Club Functions", () => {
         isClubAdmin: true,
         joinedAt: Date.now(),
       });
+      const membershipId = membershipRecord._id;
       await clubHelpers.deleteClubMembership(membershipId);
 
       const asOwner = t.withIdentity({ subject: owner });
       await expect(
-        asOwner.mutation(api.service.clubs.functions.banClubMember, {
+        asOwner.mutation(api.service.clubs.functions.banAndRemoveClubMember, {
           membershipId,
           reason: "Test ban reason",
         }),
@@ -1397,16 +1555,19 @@ describe("Club Functions", () => {
     });
   });
 
-  describe("unbanClubMember", () => {
+  describe("unbanUserFromClub", () => {
     it("successfully unbans a member", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const member = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const memberUser = await userHelpers.insertUser("member@example.com");
+      const member = memberUser._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(member));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: owner,
@@ -1416,10 +1577,11 @@ describe("Club Functions", () => {
         joinedAt: Date.now(),
       });
 
-      const ban = await clubHelpers.insertClubBan(createTestClubBan(clubId, member, owner));
+      const banRecord = await clubHelpers.insertClubBan(createTestClubBan(clubId, member, owner));
+      const ban = banRecord._id;
 
       const asOwner = t.withIdentity({ subject: owner });
-      await asOwner.mutation(api.service.clubs.functions.unbanClubMember, {
+      await asOwner.mutation(api.service.clubs.functions.unbanUserFromClub, {
         clubId,
         userId: member,
       });
@@ -1434,14 +1596,17 @@ describe("Club Functions", () => {
     });
 
     it("fails when user is not banned", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const member = await userHelpers.insertUser("member@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const memberUser = await userHelpers.insertUser("member@example.com");
+      const member = memberUser._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(member));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: owner,
@@ -1453,7 +1618,7 @@ describe("Club Functions", () => {
 
       const asOwner = t.withIdentity({ subject: owner });
       await expect(
-        asOwner.mutation(api.service.clubs.functions.unbanClubMember, {
+        asOwner.mutation(api.service.clubs.functions.unbanUserFromClub, {
           clubId,
           userId: member,
         }),
@@ -1461,18 +1626,139 @@ describe("Club Functions", () => {
     });
   });
 
+  describe("approveClubMemberships", () => {
+    it("approves multiple pending memberships", async () => {
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const user1Obj = await userHelpers.insertUser("user1@example.com");
+      const user1 = user1Obj._id;
+      const user2Obj = await userHelpers.insertUser("user2@example.com");
+      const user2 = user2Obj._id;
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(user1));
+      await userHelpers.insertProfile(createTestProfile(user2));
+
+      const club = await clubHelpers.insertClub(createTestClub(owner));
+      const clubId = club._id;
+
+      const membership1 = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, user1, { isApproved: false }),
+      );
+      const membership2 = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, user2, { isApproved: false }),
+      );
+
+      const asOwner = t.withIdentity({ subject: owner });
+      const result = await asOwner.mutation(api.service.clubs.functions.approveClubMemberships, {
+        membershipIds: [membership1._id, membership2._id],
+      });
+
+      expect(result).toBe(2);
+
+      const updatedMembership1 = await clubHelpers.getMembership(membership1._id);
+      const updatedMembership2 = await clubHelpers.getMembership(membership2._id);
+      expect(updatedMembership1?.isApproved).toBe(true);
+      expect(updatedMembership2?.isApproved).toBe(true);
+    });
+
+    it("returns 0 when no memberships to approve", async () => {
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      await userHelpers.insertProfile(createTestProfile(owner));
+
+      const asOwner = t.withIdentity({ subject: owner });
+      const result = await asOwner.mutation(api.service.clubs.functions.approveClubMemberships, {
+        membershipIds: [],
+      });
+
+      expect(result).toBe(0);
+    });
+  });
+
+  describe("removeMembers", () => {
+    it("removes multiple members from club", async () => {
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const user1Obj = await userHelpers.insertUser("user1@example.com");
+      const user1 = user1Obj._id;
+      const user2Obj = await userHelpers.insertUser("user2@example.com");
+      const user2 = user2Obj._id;
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(user1));
+      await userHelpers.insertProfile(createTestProfile(user2));
+
+      const club = await clubHelpers.insertClub(createTestClub(owner, { numMembers: 3 }));
+      const clubId = club._id;
+
+      const membership1 = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, user1),
+      );
+      const membership2 = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, user2),
+      );
+
+      const asOwner = t.withIdentity({ subject: owner });
+      const result = await asOwner.mutation(api.service.clubs.functions.removeMembers, {
+        membershipIds: [membership1._id, membership2._id],
+      });
+
+      expect(result).toBe(2);
+
+      const deletedMembership1 = await clubHelpers.getMembership(membership1._id);
+      const deletedMembership2 = await clubHelpers.getMembership(membership2._id);
+      expect(deletedMembership1).toBeNull();
+      expect(deletedMembership2).toBeNull();
+
+      const updatedClub = await clubHelpers.getClub(clubId);
+      expect(updatedClub!.numMembers).toBe(1);
+    });
+
+    it("prevents removing club owner", async () => {
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const userObj = await userHelpers.insertUser("user@example.com");
+      const user = userObj._id;
+
+      await userHelpers.insertProfile(createTestProfile(owner));
+      await userHelpers.insertProfile(createTestProfile(user));
+
+      const club = await clubHelpers.insertClub(createTestClub(owner));
+      const clubId = club._id;
+
+      const ownerMembership = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, owner, { isClubAdmin: true }),
+      );
+      const userMembership = await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, user),
+      );
+
+      const asOwner = t.withIdentity({ subject: owner });
+      await expect(
+        asOwner.mutation(api.service.clubs.functions.removeMembers, {
+          membershipIds: [ownerMembership._id, userMembership._id],
+        }),
+      ).rejects.toThrow(CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR);
+    });
+  });
+
   describe("listClubBans", () => {
     it("returns active bans for club", async () => {
-      const owner = await userHelpers.insertUser("owner@example.com");
-      const bannedUser1 = await userHelpers.insertUser("banned1@example.com");
-      const bannedUser2 = await userHelpers.insertUser("banned2@example.com");
+      const ownerUser = await userHelpers.insertUser("owner@example.com");
+      const owner = ownerUser._id;
+      const bannedUser1Obj = await userHelpers.insertUser("banned1@example.com");
+      const bannedUser1 = bannedUser1Obj._id;
+      const bannedUser2Obj = await userHelpers.insertUser("banned2@example.com");
+      const bannedUser2 = bannedUser2Obj._id;
 
       await userHelpers.insertProfile(createTestProfile(owner));
       await userHelpers.insertProfile(createTestProfile(bannedUser1));
       await userHelpers.insertProfile(createTestProfile(bannedUser2));
 
       const club = createTestClub(owner);
-      const clubId = await clubHelpers.insertClub(club);
+      const clubRecord = await clubHelpers.insertClub(club);
+      const clubId = clubRecord._id;
       await clubHelpers.insertMembership({
         clubId,
         userId: owner,

@@ -3,15 +3,14 @@ import {
   USER_PROFILE_ALREADY_EXISTS_ERROR,
   USER_PROFILE_REQUIRED_ERROR,
 } from "@/convex/constants/errors";
+import { authenticatedMutation, authenticatedQuery, publicQuery } from "@/convex/functions";
 import {
   createActivity as dtoCreateActivity,
   listActivitiesForRelatedResource as dtoListActivityForUser,
 } from "@/convex/service/activities/database";
-import {
-  authenticatedMutationWithRLS,
-  authenticatedQueryWithRLS,
-  publicQueryWithRLS,
-} from "@/convex/service/utils/functions";
+import { activitySchema } from "@/convex/service/activities/schemas";
+import { getMetadata } from "@/convex/service/utils/metadata";
+import { paginatedResult } from "@/convex/service/utils/pagination";
 import { enforceOwnershipOrAdmin } from "@/convex/service/utils/validators/auth";
 import { validateDateOfBirth } from "@/convex/service/utils/validators/profile";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
@@ -19,23 +18,24 @@ import { convexToZod, withSystemFields, zid } from "convex-helpers/server/zod";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError } from "convex/values";
 import z from "zod";
-import { activitySchema } from "../activities/schemas";
-import { getMetadata } from "../utils/metadata";
-import { paginatedResult } from "../utils/pagination";
 import {
   createUserProfile as dtoCreateUserProfile,
   getCurrentUser as dtoGetCurrentUser,
   getProfileByUserId as dtoGetProfileByUserId,
   updateUserProfile as dtoUpdateUserProfile,
 } from "./database";
-import { userDetailsSchema, userProfileCreateSchema, userProfileUpdateSchema } from "./schemas";
+import {
+  userDetailsSchema,
+  userProfileCreateSchema,
+  userProfileSchema,
+  userProfileUpdateSchema,
+} from "./schemas";
 
 /**
  * Gets the current authenticated user with their profile information.
  * @returns User details with profile if authenticated, null otherwise
  */
-export const getCurrentUser = publicQueryWithRLS()({
-  args: {},
+export const getCurrentUser = publicQuery()({
   returns: userDetailsSchema.nullable(),
   handler: async (ctx) => await dtoGetCurrentUser(ctx),
 });
@@ -45,7 +45,7 @@ export const getCurrentUser = publicQueryWithRLS()({
  * Users can only see their own activities.
  * @returns Paginated list of user activities
  */
-export const listUserActivities = authenticatedQueryWithRLS()({
+export const listUserActivities = authenticatedQuery()({
   args: {
     userId: zid("users"),
     pagination: convexToZod(paginationOptsValidator),
@@ -64,33 +64,34 @@ export const listUserActivities = authenticatedQueryWithRLS()({
  * @returns User Profile ID
  * @throws ConvexError when profile already exists for the user
  */
-export const createUserProfile = authenticatedMutationWithRLS({ profileRequired: false })({
-  args: userProfileCreateSchema,
-  returns: zid("userProfiles"),
+export const createUserProfile = authenticatedMutation({ profileRequired: false })({
+  args: {
+    input: userProfileCreateSchema,
+  },
+  returns: z.object(withSystemFields("userProfiles", userProfileSchema.shape)),
   handler: async (ctx, args) => {
     const { currentUser } = ctx;
-    enforceOwnershipOrAdmin(currentUser, args.userId);
+    const { input } = args;
+    enforceOwnershipOrAdmin(currentUser, input.userId);
 
     // Validate profile data
-    if (args.dob) {
-      validateDateOfBirth(args.dob);
+    if (input.dob) {
+      validateDateOfBirth(input.dob);
     }
 
-    const existingProfile = await dtoGetProfileByUserId(ctx, args.userId);
+    const existingProfile = await dtoGetProfileByUserId(ctx, input.userId);
     if (existingProfile) {
       throw new ConvexError(USER_PROFILE_ALREADY_EXISTS_ERROR);
     }
-    const profileId = await dtoCreateUserProfile(ctx, args);
+    const profile = await dtoCreateUserProfile(ctx, input.userId, input);
 
     await dtoCreateActivity(ctx, {
-      resourceId: profileId,
+      resourceId: profile._id,
       relatedId: currentUser._id,
       type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
-      createdBy: ctx.currentUser._id,
-      createdAt: Date.now(),
     });
 
-    return profileId;
+    return profile;
   },
 });
 
@@ -100,30 +101,31 @@ export const createUserProfile = authenticatedMutationWithRLS({ profileRequired:
  * Admin can update anyone's profile.
  * @throws ConvexError when user profile doesn't exist, rate limit exceeded, or access denied
  */
-export const updateUserProfile = authenticatedMutationWithRLS()({
-  args: userProfileUpdateSchema,
+export const updateUserProfile = authenticatedMutation()({
+  args: {
+    input: userProfileUpdateSchema,
+  },
   handler: async (ctx, args) => {
     const { currentUser } = ctx;
+    const { input } = args;
     await enforceRateLimit(ctx, "profileUpdate", currentUser._id);
-    enforceOwnershipOrAdmin(currentUser, args.userId);
+    enforceOwnershipOrAdmin(currentUser, input.userId);
 
     // Validate profile data
-    if (args.dob) {
-      validateDateOfBirth(args.dob);
+    if (input.dob) {
+      validateDateOfBirth(input.dob);
     }
 
-    const profile = await dtoGetProfileByUserId(ctx, args.userId);
+    const profile = await dtoGetProfileByUserId(ctx, input.userId);
     if (!profile) {
       throw new ConvexError(USER_PROFILE_REQUIRED_ERROR);
     }
-    await dtoUpdateUserProfile(ctx, profile._id, args);
+    await dtoUpdateUserProfile(ctx, profile._id, input);
 
     await dtoCreateActivity(ctx, {
       resourceId: profile._id,
       relatedId: currentUser._id,
       type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
-      createdBy: ctx.currentUser._id,
-      createdAt: Date.now(),
       metadata: getMetadata(profile, args),
     });
   },

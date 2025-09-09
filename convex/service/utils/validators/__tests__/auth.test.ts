@@ -1,5 +1,4 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   AUTH_UNAUTHENTICATED_ERROR,
@@ -11,6 +10,7 @@ import {
   enforceOwnershipOrAdmin,
   isOwnerOrSystemAdmin,
 } from "@/convex/service/utils/validators/auth";
+import { QueryCtx } from "@/convex/types";
 import { createTestProfile, createTestUserRecord } from "@/test-utils/samples/users";
 import { ConvexError } from "convex/values";
 import { beforeEach, describe, expect, it, vi } from "vitest";

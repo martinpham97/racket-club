@@ -1,6 +1,6 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { ActivityType } from "@/convex/constants/activities";
+import { MutationCtx, QueryCtx } from "@/convex/types";
 import { PaginationOptions, PaginationResult } from "convex/server";
 import { Activity, ActivityCreateInput, ResourceId } from "./schemas";
 
@@ -14,7 +14,7 @@ export const getActivity = async (
   ctx: QueryCtx,
   activityId: Id<"activities">,
 ): Promise<Activity | null> => {
-  return await ctx.db.get(activityId);
+  return await ctx.table("activities").get(activityId);
 };
 
 /**
@@ -29,9 +29,9 @@ export const listActivitiesForResource = async (
   resourceId: ResourceId,
   paginationOpts: PaginationOptions,
 ): Promise<PaginationResult<Activity>> => {
-  return await ctx.db
-    .query("activities")
-    .withIndex("resourceDate", (q) => q.eq("resourceId", resourceId))
+  return await ctx
+    .table("activities")
+    .filter((q) => q.eq(q.field("resourceId"), resourceId))
     .order("desc")
     .paginate(paginationOpts);
 };
@@ -48,9 +48,9 @@ export const listActivitiesForRelatedResource = async (
   relatedId: ResourceId,
   paginationOpts: PaginationOptions,
 ): Promise<PaginationResult<Activity>> => {
-  return await ctx.db
-    .query("activities")
-    .withIndex("relatedId", (q) => q.eq("relatedId", relatedId))
+  return await ctx
+    .table("activities")
+    .filter((q) => q.eq(q.field("relatedId"), relatedId))
     .order("desc")
     .paginate(paginationOpts);
 };
@@ -69,10 +69,14 @@ export const getScheduledActivityForResource = async (
   scheduledAt: number,
   type: ActivityType,
 ): Promise<Activity | null> => {
-  return await ctx.db
-    .query("activities")
-    .withIndex("resourceTypeScheduledAt", (q) =>
-      q.eq("resourceId", resourceId).eq("type", type).eq("scheduledAt", scheduledAt),
+  return await ctx
+    .table("activities")
+    .filter((q) =>
+      q.and(
+        q.eq(q.field("resourceId"), resourceId),
+        q.eq(q.field("type"), type),
+        q.eq(q.field("scheduledAt"), scheduledAt),
+      ),
     )
     .first();
 };
@@ -81,18 +85,21 @@ export const getScheduledActivityForResource = async (
  * Creates a new activity.
  * @param ctx Mutation context
  * @param input Activity creation data
- * @returns ID of the created activity
+ * @returns Created activity
  */
 export const createActivity = async (
   ctx: MutationCtx,
   input: ActivityCreateInput,
-): Promise<Id<"activities">> => {
+): Promise<Activity> => {
   const createdAt = Date.now();
-  return await ctx.db.insert("activities", {
-    ...input,
-    createdAt,
-    date: input.scheduledAt ?? createdAt,
-  });
+  return await ctx
+    .table("activities")
+    .insert({
+      ...input,
+      createdAt,
+      date: input.scheduledAt ?? createdAt,
+    })
+    .get();
 };
 
 /**
@@ -104,10 +111,11 @@ export const deleteActivitiesForResource = async (
   ctx: MutationCtx,
   resourceId: ResourceId,
 ): Promise<void> => {
-  const activities = await ctx.db
-    .query("activities")
-    .withIndex("resourceType", (q) => q.eq("resourceId", resourceId))
-    .order("desc")
-    .collect();
-  activities.forEach(async (activity) => await ctx.db.delete(activity._id));
+  const activities = await ctx
+    .table("activities")
+    .filter((q) => q.eq(q.field("resourceId"), resourceId));
+
+  for (const activity of activities) {
+    await ctx.table("activities").getX(activity._id).delete();
+  }
 };

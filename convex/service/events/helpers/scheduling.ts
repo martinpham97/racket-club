@@ -1,101 +1,74 @@
 import { internal } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { MutationCtx } from "@/convex/_generated/server";
-import { ACTIVITY_TYPES, ActivityType } from "@/convex/constants/activities";
 import { EVENT_STATUS, MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
-import {
-  createActivity,
-  getScheduledActivityForResource,
-} from "@/convex/service/activities/database";
+import { EventSeries } from "@/convex/service/events/schemas";
 import { getStartOfDayInTimezone, getUtcTimestampForDate } from "@/convex/service/utils/time";
-import { getOrThrow } from "convex-helpers/server/relationships";
+import { MutationCtx } from "@/convex/types";
 import { addDays, isFuture, subDays } from "date-fns";
-import { ActivityMetadata } from "../../activities/schemas";
-import { EventSeries } from "../schemas";
 
 /**
- * Creates or retrieves a scheduled activity for event transitions
+ * Schedules event series deactivation
  * @param ctx Mutation context
- * @param type Activity type for the transition
- * @param resourceId ID of the event series or event
- * @param scheduledAt Timestamp when the activity should execute
- * @returns Activity ID if created/found, null otherwise
+ * @param seriesId ID of the event series
+ * @param scheduledAt Timestamp when deactivation should execute
  */
-export const getOrCreateEventScheduledTransitionActivity = async (
+export const scheduleEventSeriesDeactivation = async (
   ctx: MutationCtx,
-  type: ActivityType,
-  resourceId: Id<"eventSeries"> | Id<"events">,
+  seriesId: Id<"eventSeries">,
   scheduledAt: number,
-): Promise<Id<"activities"> | null> => {
-  const existingTransitionActivity = await getScheduledActivityForResource(
-    ctx,
-    resourceId,
+): Promise<void> => {
+  const series = await ctx.table("eventSeries").getX(seriesId);
+  const existingSchedule = await series.edge("onSeriesEndFunction");
+
+  if (existingSchedule) {
+    return;
+  }
+
+  const onSeriesEndFunctionId = await ctx.scheduler.runAt(
     scheduledAt,
-    type,
+    internal.service.events.functions._deactivateEventSeries,
+    { eventSeriesId: seriesId },
   );
 
-  if (existingTransitionActivity) {
-    return existingTransitionActivity._id;
+  await series.patch({ onSeriesEndFunctionId });
+};
+
+/**
+ * Schedules event status transitions
+ * @param ctx Mutation context
+ * @param eventId ID of the event
+ * @param startTime Timestamp when event should start
+ * @param endTime Timestamp when event should complete
+ */
+export const scheduleEventStatusTransitions = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+  startTime: number,
+  endTime: number,
+): Promise<void> => {
+  const event = await ctx.table("events").getX(eventId);
+
+  // Schedule start transition
+  const existingStartSchedule = await event.edge("onEventStartFunction");
+  if (!existingStartSchedule) {
+    const onEventStartFunctionId = await ctx.scheduler.runAt(
+      startTime,
+      internal.service.events.functions._updateEventStatus,
+      { eventId, status: EVENT_STATUS.IN_PROGRESS },
+    );
+    await event.patch({ onEventStartFunctionId });
   }
 
-  let scheduledFunctionId: Id<"_scheduled_functions"> | undefined;
-  const metadata: ActivityMetadata = [];
-
-  switch (type) {
-    case ACTIVITY_TYPES.EVENT_SERIES_DEACTIVATION_SCHEDULED:
-      scheduledFunctionId = await ctx.scheduler.runAt(
-        scheduledAt,
-        internal.service.events.functions._deactivateEventSeries,
-        { eventSeriesId: resourceId as Id<"eventSeries"> },
-      );
-      metadata.push({
-        fieldChanged: "isActive",
-        newValue: "false",
-      });
-      break;
-    case ACTIVITY_TYPES.EVENT_IN_PROGRESS_SCHEDULED:
-      scheduledFunctionId = await ctx.scheduler.runAt(
-        scheduledAt,
-        internal.service.events.functions._updateEventStatus,
-        {
-          eventId: resourceId as Id<"events">,
-          status: EVENT_STATUS.IN_PROGRESS,
-        },
-      );
-      metadata.push({
-        fieldChanged: "status",
-        newValue: EVENT_STATUS.IN_PROGRESS,
-      });
-      break;
-    case ACTIVITY_TYPES.EVENT_COMPLETED_SCHEDULED:
-      scheduledFunctionId = await ctx.scheduler.runAt(
-        scheduledAt,
-        internal.service.events.functions._updateEventStatus,
-        {
-          eventId: resourceId as Id<"events">,
-          status: EVENT_STATUS.COMPLETED,
-        },
-      );
-      metadata.push({
-        fieldChanged: "status",
-        newValue: EVENT_STATUS.COMPLETED,
-      });
-      break;
-    default:
-      break;
+  // Schedule completion transition
+  const existingCompletionSchedule = await event.edge("onEventEndFunction");
+  if (!existingCompletionSchedule) {
+    const onEventEndFunctionId = await ctx.scheduler.runAt(
+      endTime,
+      internal.service.events.functions._updateEventStatus,
+      { eventId, status: EVENT_STATUS.COMPLETED },
+    );
+    await event.patch({ onEventEndFunctionId });
   }
-
-  if (scheduledFunctionId) {
-    return await createActivity(ctx, {
-      type,
-      resourceId,
-      relatedId: scheduledFunctionId,
-      scheduledAt,
-      metadata,
-    });
-  }
-
-  return null;
 };
 
 /**
@@ -113,18 +86,7 @@ export const getOrScheduleEventStatusTransitions = async (
 ): Promise<void> => {
   const startTime = getUtcTimestampForDate(series.startTime, series.location.timezone, date);
   const endTime = getUtcTimestampForDate(series.endTime, series.location.timezone, date);
-  await getOrCreateEventScheduledTransitionActivity(
-    ctx,
-    ACTIVITY_TYPES.EVENT_IN_PROGRESS_SCHEDULED,
-    eventId,
-    startTime,
-  );
-  await getOrCreateEventScheduledTransitionActivity(
-    ctx,
-    ACTIVITY_TYPES.EVENT_COMPLETED_SCHEDULED,
-    eventId,
-    endTime,
-  );
+  await scheduleEventStatusTransitions(ctx, eventId, startTime, endTime);
 };
 
 /**
@@ -133,7 +95,7 @@ export const getOrScheduleEventStatusTransitions = async (
  * @param seriesId ID of the event series to deactivate
  * @param input Event series data containing schedule information
  */
-export const scheduleEventSeriesDeactivation = async (
+export const scheduleEventSeriesDeactivationAtEndDate = async (
   ctx: MutationCtx,
   seriesId: Id<"eventSeries">,
   input: EventSeries,
@@ -143,12 +105,7 @@ export const scheduleEventSeriesDeactivation = async (
     input.location.timezone,
   );
   const deactivationDate = endDateInTimezone.getTime();
-  await getOrCreateEventScheduledTransitionActivity(
-    ctx,
-    ACTIVITY_TYPES.EVENT_SERIES_DEACTIVATION_SCHEDULED,
-    seriesId,
-    deactivationDate,
-  );
+  await scheduleEventSeriesDeactivation(ctx, seriesId, deactivationDate);
 };
 
 /**
@@ -160,7 +117,7 @@ export const activateEventSeries = async (
   ctx: MutationCtx,
   eventSeries: EventSeries,
 ): Promise<void> => {
-  await scheduleEventSeriesDeactivation(ctx, eventSeries._id, eventSeries);
+  await scheduleEventSeriesDeactivationAtEndDate(ctx, eventSeries._id, eventSeries);
   const startDate = Math.max(Date.now(), eventSeries.schedule.startDate);
   const endDate = eventSeries.schedule.endDate;
   const { events } = await ctx.runMutation(
@@ -192,7 +149,7 @@ export const scheduleNextEventGeneration = async (
     return;
   }
 
-  const series = await getOrThrow(ctx, seriesId);
+  const series = await ctx.table("eventSeries").getX(seriesId);
   const lastGeneratedDate = Math.max(...currentGeneratedDates);
   const scheduleDate = subDays(lastGeneratedDate, MAX_EVENT_GENERATION_DAYS).getTime();
 
@@ -209,4 +166,39 @@ export const scheduleNextEventGeneration = async (
       },
     );
   }
+};
+
+/**
+ * Gets the status of a scheduled function via edge
+ * @param ctx Mutation context
+ * @param seriesId ID of the event series
+ * @returns Status of the deactivation schedule or null if not found
+ */
+export const getEventSeriesDeactivationStatus = async (
+  ctx: MutationCtx,
+  seriesId: Id<"eventSeries">,
+): Promise<string | null> => {
+  const series = await ctx.table("eventSeries").getX(seriesId);
+  const schedule = await series.edge("onSeriesEndFunction");
+  return schedule?.state.kind ?? null;
+};
+
+/**
+ * Gets the status of event scheduled transitions
+ * @param ctx Mutation context
+ * @param eventId ID of the event
+ * @returns Object with start and completion schedule statuses
+ */
+export const getEventScheduleStatuses = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+): Promise<{ onEventStart: string | null; onEventEnd: string | null }> => {
+  const event = await ctx.table("events").getX(eventId);
+  const onEventStart = await event.edge("onEventStartFunction");
+  const onEventEnd = await event.edge("onEventEndFunction");
+
+  return {
+    onEventStart: onEventStart?.state.kind ?? null,
+    onEventEnd: onEventEnd?.state.kind ?? null,
+  };
 };

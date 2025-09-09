@@ -1,7 +1,5 @@
 import { Id } from "@/convex/_generated/dataModel";
-import schema from "@/convex/schema";
 import { Club, ClubBan, ClubCreateInput, ClubMembership } from "@/convex/service/clubs/schemas";
-import { TestConvex } from "convex-test";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
 
@@ -78,7 +76,7 @@ export const createTestClubBan = (
   userId?: Id<"users">,
   bannedBy?: Id<"users">,
   overrides?: Partial<ClubBan>,
-): Omit<ClubBan, "_id" | "_creationTime"> => ({
+): WithoutSystemFields<ClubBan> => ({
   clubId: clubId || genId<"clubs">("clubs"),
   userId: userId || genId<"users">("users"),
   bannedBy: bannedBy || genId<"users">("users"),
@@ -100,75 +98,81 @@ export const createTestClubBanRecord = (
 });
 
 export class ClubTestHelpers {
-  constructor(private t: TestConvex<typeof schema>) {}
+  constructor(private t: ReturnType<typeof import("@/convex/setup.testing").convexTest>) {}
+
+  async getClub(clubId: Id<"clubs">) {
+    return await this.t.runWithCtx((ctx) => ctx.table("clubs").getX(clubId));
+  }
 
   async insertClub(club: WithoutSystemFields<Club>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("clubs", club);
-    });
+    return await this.t.runWithCtx((ctx) => ctx.table("clubs").insert(club).get());
   }
 
   async deleteClub(clubId: Id<"clubs">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(clubId));
+    return await this.t.runWithCtx((ctx) => ctx.table("clubs").getX(clubId).delete());
   }
 
   async insertMembership(membership: WithoutSystemFields<ClubMembership>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("clubMemberships", membership);
-    });
-  }
-
-  async insertClubBan(ban: WithoutSystemFields<ClubBan>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("clubBans", ban);
-    });
-  }
-
-  async approveClub(clubId: Id<"clubs">) {
-    return await this.t.run(async (ctx) => ctx.db.patch(clubId, { isApproved: true }));
-  }
-
-  async getClubRecord(clubId: Id<"clubs">) {
-    return await this.t.run(async (ctx) => ctx.db.get(clubId));
+    return await this.t.runWithCtx((ctx) => ctx.table("clubMemberships").insert(membership).get());
   }
 
   async getMembership(membershipId: Id<"clubMemberships">) {
-    return await this.t.run(async (ctx) => ctx.db.get(membershipId));
+    return await this.t.runWithCtx((ctx) => ctx.table("clubMemberships").get(membershipId));
+  }
+
+  async insertClubBan(ban: WithoutSystemFields<ClubBan>) {
+    return await this.t.runWithCtx((ctx) => ctx.table("clubBans").insert(ban).get());
   }
 
   async getClubBan(banId: Id<"clubBans">) {
-    return await this.t.run(async (ctx) => ctx.db.get(banId));
+    return await this.t.runWithCtx((ctx) => ctx.table("clubBans").getX(banId));
+  }
+
+  async approveClub(clubId: Id<"clubs">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("clubs").getX(clubId).patch({ isApproved: true }),
+    );
   }
 
   async getMembershipForUser(clubId: Id<"clubs">, userId: Id<"users">) {
-    return await this.t.run(async (ctx) =>
-      ctx.db
-        .query("clubMemberships")
-        .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
+    return await this.t.runWithCtx((ctx) =>
+      ctx
+        .table("clubMemberships")
+        .filter((q) => q.and(q.eq(q.field("clubId"), clubId), q.eq(q.field("userId"), userId)))
         .unique(),
     );
   }
 
   async getActiveBanForUser(clubId: Id<"clubs">, userId: Id<"users">) {
-    return await this.t.run(async (ctx) =>
-      ctx.db
-        .query("clubBans")
-        .withIndex("clubUser", (q) => q.eq("clubId", clubId).eq("userId", userId))
-        .filter((q) => q.eq(q.field("isActive"), true))
+    return await this.t.runWithCtx((ctx) =>
+      ctx
+        .table("clubBans")
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("clubId"), clubId),
+            q.eq(q.field("userId"), userId),
+            q.eq(q.field("isActive"), true),
+          ),
+        )
         .unique(),
     );
   }
 
   async listActiveBansForClub(clubId: Id<"clubs">) {
-    return await this.t.run(async (ctx) =>
-      ctx.db
-        .query("clubBans")
-        .withIndex("clubActive", (q) => q.eq("clubId", clubId).eq("isActive", true))
-        .collect(),
+    return await this.t.runWithCtx((ctx) =>
+      ctx
+        .table("clubBans")
+        .filter((q) => q.and(q.eq(q.field("clubId"), clubId), q.eq(q.field("isActive"), true))),
     );
   }
 
   async deleteClubMembership(membershipId: Id<"clubMemberships">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(membershipId));
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("clubMemberships").getX(membershipId).delete(),
+    );
+  }
+
+  async getClubRecord(clubId: Id<"clubs">) {
+    return await this.t.runWithCtx((ctx) => ctx.table("clubs").get(clubId));
   }
 }

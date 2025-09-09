@@ -1,8 +1,7 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { MutationCtx, QueryCtx } from "@/convex/_generated/server";
 import { AUTH_PROVIDER_NO_EMAIL_ERROR } from "@/convex/constants/errors";
+import { MutationCtx, QueryCtx } from "@/convex/types";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { getOneFrom } from "convex-helpers/server/relationships";
 import { ConvexError } from "convex/values";
 import {
   User,
@@ -19,7 +18,7 @@ import {
  * @returns User object if found, null otherwise
  */
 export const findUserByEmail = async (ctx: QueryCtx, email: string): Promise<User | null> => {
-  return await getOneFrom(ctx.db, "users", "email", email);
+  return await ctx.table("users").get("email", email);
 };
 
 /**
@@ -32,10 +31,10 @@ export const getCurrentUser = async (ctx: QueryCtx): Promise<UserDetails | null>
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
 
-  const user = await ctx.db.get(userId);
+  const user = await ctx.table("users").get(userId);
   if (!user) return null;
 
-  const profile = await getProfileByUserId(ctx, userId);
+  const profile = await user.edge("profile");
   return { ...user, profile };
 };
 
@@ -70,7 +69,7 @@ export const getOrCreateUser = async (
     return existingUser._id;
   }
 
-  return ctx.db.insert("users", {
+  return ctx.table("users").insert({
     email: args.email,
   });
 };
@@ -85,24 +84,29 @@ export const getProfileByUserId = async (
   ctx: QueryCtx,
   userId: Id<"users">,
 ): Promise<UserProfile | null> => {
-  return await getOneFrom(ctx.db, "userProfiles", "userId", userId);
+  return await ctx.table("userProfiles").get("userId", userId);
 };
 
 /**
  * Creates a non-admin new user profile.
  * @param ctx Mutation context
+ * @param userId User ID to associate with the profile
  * @param input User profile creation data
- * @returns ID of the created user profile
+ * @returns User profile
  */
 export const createUserProfile = async (
   ctx: MutationCtx,
+  userId: Id<"users">,
   input: UserProfileCreateInput,
-): Promise<Id<"userProfiles">> => {
-  const profile = await ctx.db.insert("userProfiles", {
-    ...input,
-    isAdmin: false,
-  });
-  return profile;
+): Promise<UserProfile> => {
+  return await ctx
+    .table("userProfiles")
+    .insert({
+      ...input,
+      userId,
+      isAdmin: false,
+    })
+    .get();
 };
 
 /**
@@ -110,13 +114,18 @@ export const createUserProfile = async (
  * @param ctx Mutation context
  * @param profileId Profile ID
  * @param input User profile update data
+ * @returns Updated user profile
  */
 export const updateUserProfile = async (
   ctx: MutationCtx,
   profileId: Id<"userProfiles">,
   input: UserProfileUpdateInput,
-): Promise<void> => {
-  return await ctx.db.patch(profileId, {
-    ...input,
-  });
+): Promise<UserProfile> => {
+  return await ctx
+    .table("userProfiles")
+    .getX(profileId)
+    .patch({
+      ...input,
+    })
+    .get();
 };

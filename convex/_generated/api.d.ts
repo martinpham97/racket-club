@@ -13,6 +13,7 @@ import type * as constants_activities from "../constants/activities.js";
 import type * as constants_errors from "../constants/errors.js";
 import type * as constants_events from "../constants/events.js";
 import type * as constants_rateLimitConfig from "../constants/rateLimitConfig.js";
+import type * as functions from "../functions.js";
 import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
 import type * as myFunctions from "../myFunctions.js";
@@ -23,11 +24,14 @@ import type * as service_clubs_functions from "../service/clubs/functions.js";
 import type * as service_clubs_schemas from "../service/clubs/schemas.js";
 import type * as service_events_database from "../service/events/database.js";
 import type * as service_events_functions from "../service/events/functions.js";
+import type * as service_events_helpers_dates from "../service/events/helpers/dates.js";
+import type * as service_events_helpers_filters from "../service/events/helpers/filters.js";
+import type * as service_events_helpers_scheduling from "../service/events/helpers/scheduling.js";
+import type * as service_events_helpers_timeslots from "../service/events/helpers/timeslots.js";
 import type * as service_events_schemas from "../service/events/schemas.js";
 import type * as service_users_database from "../service/users/database.js";
 import type * as service_users_functions from "../service/users/functions.js";
 import type * as service_users_schemas from "../service/users/schemas.js";
-import type * as service_utils_database from "../service/utils/database.js";
 import type * as service_utils_functions from "../service/utils/functions.js";
 import type * as service_utils_metadata from "../service/utils/metadata.js";
 import type * as service_utils_pagination from "../service/utils/pagination.js";
@@ -38,6 +42,7 @@ import type * as service_utils_validators_clubs from "../service/utils/validator
 import type * as service_utils_validators_events from "../service/utils/validators/events.js";
 import type * as service_utils_validators_profile from "../service/utils/validators/profile.js";
 import type * as service_utils_validators_rateLimit from "../service/utils/validators/rateLimit.js";
+import type * as types from "../types.js";
 
 import type {
   ApiFromModules,
@@ -59,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   "constants/errors": typeof constants_errors;
   "constants/events": typeof constants_events;
   "constants/rateLimitConfig": typeof constants_rateLimitConfig;
+  functions: typeof functions;
   http: typeof http;
   migrations: typeof migrations;
   myFunctions: typeof myFunctions;
@@ -69,11 +75,14 @@ declare const fullApi: ApiFromModules<{
   "service/clubs/schemas": typeof service_clubs_schemas;
   "service/events/database": typeof service_events_database;
   "service/events/functions": typeof service_events_functions;
+  "service/events/helpers/dates": typeof service_events_helpers_dates;
+  "service/events/helpers/filters": typeof service_events_helpers_filters;
+  "service/events/helpers/scheduling": typeof service_events_helpers_scheduling;
+  "service/events/helpers/timeslots": typeof service_events_helpers_timeslots;
   "service/events/schemas": typeof service_events_schemas;
   "service/users/database": typeof service_users_database;
   "service/users/functions": typeof service_users_functions;
   "service/users/schemas": typeof service_users_schemas;
-  "service/utils/database": typeof service_utils_database;
   "service/utils/functions": typeof service_utils_functions;
   "service/utils/metadata": typeof service_utils_metadata;
   "service/utils/pagination": typeof service_utils_pagination;
@@ -84,6 +93,7 @@ declare const fullApi: ApiFromModules<{
   "service/utils/validators/events": typeof service_utils_validators_events;
   "service/utils/validators/profile": typeof service_utils_validators_profile;
   "service/utils/validators/rateLimit": typeof service_utils_validators_rateLimit;
+  types: typeof types;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

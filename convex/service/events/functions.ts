@@ -1,15 +1,14 @@
 import { internal } from "@/convex/_generated/api";
-import { Id } from "@/convex/_generated/dataModel";
-import { internalMutation, MutationCtx } from "@/convex/_generated/server";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   EVENT_CANNOT_GENERATE_DUE_TO_INACTIVE_STATUS_ERROR,
 } from "@/convex/constants/errors";
-import { getClubMembershipForUser, listUserClubIds } from "@/convex/service/clubs/database";
+import { authenticatedMutation, authenticatedQuery, internalMutation } from "@/convex/functions";
 import {
-  authenticatedMutationWithRLS,
-  authenticatedQueryWithRLS,
-} from "@/convex/service/utils/functions";
+  getClubMembershipForUser,
+  getClubOrThrow,
+  listUserClubIds,
+} from "@/convex/service/clubs/database";
 import { paginatedResult } from "@/convex/service/utils/pagination";
 import {
   enforceClubOwnershipOrAdmin,
@@ -23,7 +22,6 @@ import {
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
 } from "@/convex/service/utils/validators/events";
-import { getOrThrow } from "convex-helpers/server/relationships";
 import {
   convexToZod,
   withSystemFields,
@@ -37,7 +35,9 @@ import z from "zod";
 import {
   createEvent as dtoCreateEvent,
   createEventSeries as dtoCreateEventSeries,
-  getEventAtDate as dtoGetEventAtDate,
+  getEventOrThrow as dtoGetEventOrThrow,
+  getEventSeriesOrThrow as dtoGetEventSeriesOrThrow,
+  getOrCreateEventFromSeries,
   listAllEventParticipants as dtoListAllEventParticipants,
   listEventSeriesForClub as dtoListEventSeriesForClub,
   listEventsForClub as dtoListEventsForClub,
@@ -46,6 +46,7 @@ import {
   updateEventSeries as dtoUpdateEventSeries,
 } from "./database";
 import { generateUpcomingEventDates } from "./helpers/dates";
+import { getOrCreatePermanentParticipants } from "./helpers/participants";
 import { activateEventSeries, getOrScheduleEventStatusTransitions } from "./helpers/scheduling";
 import {
   findUserParticipationByTimeslotId,
@@ -60,8 +61,9 @@ import {
   EventDetails,
   eventDetailsSchema,
   eventFiltersSchema,
+  EventParticipant,
+  eventParticipantSchema,
   eventSchema,
-  EventSeries,
   eventSeriesCreateInputSchema,
   eventSeriesSchema,
   eventSeriesUpdateInputSchema,
@@ -79,12 +81,12 @@ import {
  * @returns Event series with all properties
  * @throws {ConvexError} When series not found or access denied
  */
-export const getEventSeries = authenticatedQueryWithRLS()({
+export const getEventSeries = authenticatedQuery()({
   args: { eventSeriesId: zid("eventSeries") },
   returns: z.object(withSystemFields("eventSeries", eventSeriesSchema.shape)),
   handler: async (ctx, args) => {
-    const eventSeries = await getOrThrow(ctx, args.eventSeriesId);
-    const club = await getOrThrow(ctx, eventSeries.clubId);
+    const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
+    const club = await getClubOrThrow(ctx, eventSeries.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
     return eventSeries;
   },
@@ -97,11 +99,11 @@ export const getEventSeries = authenticatedQueryWithRLS()({
  * @returns Paginated list of event seriess
  * @throws {ConvexError} When club not found or access denied
  */
-export const listClubEventSeries = authenticatedQueryWithRLS()({
+export const listClubEventSeries = authenticatedQuery()({
   args: { clubId: zid("clubs"), pagination: convexToZod(paginationOptsValidator) },
   returns: paginatedResult(z.object(withSystemFields("eventSeries", eventSeriesSchema.shape))),
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.clubId);
+    const club = await getClubOrThrow(ctx, args.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
     return await dtoListEventSeriesForClub(ctx, args.clubId, args.pagination);
   },
@@ -115,11 +117,11 @@ export const listClubEventSeries = authenticatedQueryWithRLS()({
  * @returns Event and list of participants
  * @throws {ConvexError} When not found or access denied
  */
-export const getEvent = authenticatedQueryWithRLS()({
+export const getEvent = authenticatedQuery()({
   args: { eventId: zid("events") },
   returns: eventDetailsSchema,
   handler: async (ctx, args) => {
-    const event = await getOrThrow(ctx, args.eventId);
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
     const participants = await dtoListAllEventParticipants(ctx, args.eventId);
     if (!participants.find((p) => p.userId === ctx.currentUser._id)) {
       await validateEventAccess(ctx, event, ctx.currentUser._id);
@@ -137,7 +139,7 @@ export const getEvent = authenticatedQueryWithRLS()({
  * @returns Paginated list of events
  * @throws {ConvexError} When club not found or user not a member
  */
-export const listClubEvents = authenticatedQueryWithRLS()({
+export const listClubEvents = authenticatedQuery()({
   args: {
     clubId: zid("clubs"),
     filters: eventDateRangeFilterSchema,
@@ -146,7 +148,7 @@ export const listClubEvents = authenticatedQueryWithRLS()({
   returns: paginatedResult(z.object(withSystemFields("events", eventSchema.shape))),
   handler: async (ctx, args) => {
     const { clubId, filters, pagination } = args;
-    await getOrThrow(ctx, clubId);
+    await getClubOrThrow(ctx, clubId);
     const userMembership = await getClubMembershipForUser(ctx, clubId, ctx.currentUser._id);
     if (!userMembership) {
       throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
@@ -161,7 +163,7 @@ export const listClubEvents = authenticatedQueryWithRLS()({
  * @param pagination - Pagination options
  * @returns Paginated list of events user is participating in
  */
-export const listMyEvents = authenticatedQueryWithRLS()({
+export const listMyEvents = authenticatedQuery()({
   args: {
     filters: eventDateRangeFilterSchema,
     pagination: convexToZod(paginationOptsValidator),
@@ -179,7 +181,7 @@ export const listMyEvents = authenticatedQueryWithRLS()({
  * @param pagination - Pagination options
  * @returns Paginated list of matching events
  */
-export const searchEvents = authenticatedQueryWithRLS()({
+export const searchEvents = authenticatedQuery()({
   args: {
     filters: eventFiltersSchema,
     pagination: convexToZod(paginationOptsValidator),
@@ -200,25 +202,24 @@ export const searchEvents = authenticatedQueryWithRLS()({
 /**
  * Creates a new event series with automatic generation
  * @param input - Event series configuration data
- * @returns ID of the created event series
+ * @returns Created event series
  * @throws {ConvexError} When validation fails or access denied
  */
-export const createEventSeries = authenticatedMutationWithRLS()({
+export const createEventSeries = authenticatedMutation()({
   args: { input: eventSeriesCreateInputSchema },
-  returns: zid("eventSeries"),
+  returns: z.object(withSystemFields("eventSeries", eventSeriesSchema.shape)),
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.input.clubId);
+    const club = await getClubOrThrow(ctx, args.input.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventSeriesForCreate(ctx, args.input, club);
 
-    const eventSeriesId = await dtoCreateEventSeries(ctx, args.input, ctx.currentUser._id);
-    const eventSeries = await getOrThrow(ctx, eventSeriesId);
+    const eventSeries = await dtoCreateEventSeries(ctx, args.input, ctx.currentUser._id);
 
     if (args.input.isActive) {
       await activateEventSeries(ctx, eventSeries);
     }
 
-    return eventSeriesId;
+    return eventSeries;
   },
 });
 
@@ -226,24 +227,25 @@ export const createEventSeries = authenticatedMutationWithRLS()({
  * Updates an existing event series
  * @param eventSeriesId - ID of the event series to update
  * @param input - Partial event series data to update
+ * @returns Updated event series
  * @throws {ConvexError} When series not found or access denied
  */
-export const updateEventSeries = authenticatedMutationWithRLS()({
+export const updateEventSeries = authenticatedMutation()({
   args: { eventSeriesId: zid("eventSeries"), input: eventSeriesUpdateInputSchema },
-  returns: z.null(),
+  returns: z.object(withSystemFields("eventSeries", eventSeriesSchema.shape)),
   handler: async (ctx, args) => {
-    const eventSeries = await getOrThrow(ctx, args.eventSeriesId);
-    const club = await getOrThrow(ctx, eventSeries.clubId);
+    const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
+    const club = await getClubOrThrow(ctx, eventSeries.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventSeriesForUpdate(ctx, club, eventSeries, args.input);
 
-    await dtoUpdateEventSeries(ctx, args.eventSeriesId, args.input);
+    const updatedEventSeries = await dtoUpdateEventSeries(ctx, args.eventSeriesId, args.input);
 
-    if (!eventSeries.isActive && args.input.isActive) {
+    if (!eventSeries.isActive && updatedEventSeries.isActive) {
       await activateEventSeries(ctx, eventSeries);
     }
 
-    return null;
+    return updatedEventSeries;
   },
 });
 
@@ -252,35 +254,33 @@ export const updateEventSeries = authenticatedMutationWithRLS()({
  * @param eventSeriesId - ID of the event series to delete
  * @throws {ConvexError} When series not found or access denied
  */
-export const deleteEventSeries = authenticatedMutationWithRLS()({
+export const deleteEventSeries = authenticatedMutation()({
   args: { eventSeriesId: zid("eventSeries") },
-  returns: z.null(),
   handler: async (ctx, args) => {
-    const eventSeries = await getOrThrow(ctx, args.eventSeriesId);
-    const club = await getOrThrow(ctx, eventSeries.clubId);
+    const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
+    const club = await getClubOrThrow(ctx, eventSeries.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
 
-    await ctx.db.delete(args.eventSeriesId);
-
-    return null;
+    await ctx.table("eventSeries").getX(args.eventSeriesId).delete();
   },
 });
 
 /**
  * Creates a new event
  * @param input - Event configuration data
- * @returns ID of the created event
+ * @returns Created event
  * @throws {ConvexError} When validation fails or access denied
  */
-export const createEvent = authenticatedMutationWithRLS()({
+export const createEvent = authenticatedMutation()({
   args: { input: eventCreateInputSchema },
-  returns: zid("events"),
+  returns: z.object(withSystemFields("events", eventSchema.shape)),
   handler: async (ctx, args) => {
-    const club = await getOrThrow(ctx, args.input.clubId);
+    const club = await getClubOrThrow(ctx, args.input.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventForCreate(ctx, args.input, club);
-    const eventId = await dtoCreateEvent(ctx, ctx.currentUser._id, args.input);
-    return eventId;
+
+    const event = await dtoCreateEvent(ctx, ctx.currentUser._id, args.input);
+    return event;
   },
 });
 
@@ -289,28 +289,32 @@ export const createEvent = authenticatedMutationWithRLS()({
  * @param eventSeriesId - ID of the event series
  * @param startDate - Start date for generation
  * @param endDate - End date for generation
- * @returns Array of generated event IDs
+ * @returns Array of generated events
  * @throws {ConvexError} When series inactive or access denied
  */
-export const generateEvents = authenticatedMutationWithRLS()({
+export const generateEvents = authenticatedMutation()({
   args: { eventSeriesId: zid("eventSeries"), startDate: z.number(), endDate: z.number() },
   returns: { events: z.array(z.object(withSystemFields("events", eventSchema.shape))) },
   handler: async (ctx, args): Promise<{ events: Event[] }> => {
     const { eventSeriesId, startDate, endDate } = args;
-    const eventSeries = await getOrThrow(ctx, eventSeriesId);
-    const club = await getOrThrow(ctx, eventSeries.clubId);
+    const eventSeries = await dtoGetEventSeriesOrThrow(ctx, eventSeriesId);
+    const club = await getClubOrThrow(ctx, eventSeries.clubId);
     enforceClubOwnershipOrAdmin(ctx, club);
-
     validateEventDateRange(startDate, endDate);
 
     if (!eventSeries.isActive) {
       throw new ConvexError(EVENT_CANNOT_GENERATE_DUE_TO_INACTIVE_STATUS_ERROR);
     }
 
-    return await ctx.runMutation(internal.service.events.functions._generateEventsForSeries, {
-      eventSeriesId,
-      range: { startDate, endDate },
-    });
+    const generatedEvents = await ctx.runMutation(
+      internal.service.events.functions._generateEventsForSeries,
+      {
+        eventSeriesId,
+        range: { startDate, endDate },
+      },
+    );
+
+    return generatedEvents;
   },
 });
 
@@ -318,15 +322,15 @@ export const generateEvents = authenticatedMutationWithRLS()({
  * Joins a user to a event timeslot
  * @param eventId - ID of the event
  * @param timeslotId - ID of the timeslot to join
- * @returns ID of the participation record
+ * @returns The participation record
  * @throws {ConvexError} When event full, user banned, or invalid request
  */
-export const joinEvent = authenticatedMutationWithRLS()({
+export const joinEvent = authenticatedMutation()({
   args: { eventId: zid("events"), timeslotId: z.string() },
-  returns: zid("eventParticipants"),
-  handler: async (ctx, args): Promise<Id<"eventParticipants">> => {
-    const event = await getOrThrow(ctx, args.eventId);
-    const club = await getOrThrow(ctx, event.clubId);
+  returns: z.object(withSystemFields("eventParticipants", eventParticipantSchema.shape)),
+  handler: async (ctx, args): Promise<EventParticipant> => {
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
+    const club = await getClubOrThrow(ctx, event.clubId);
     const userId = ctx.currentUser._id;
 
     const existingParticipation = await findUserParticipationByTimeslotId(
@@ -337,24 +341,28 @@ export const joinEvent = authenticatedMutationWithRLS()({
     );
 
     if (existingParticipation) {
-      return existingParticipation._id;
+      return existingParticipation;
     }
 
-    await validateUserNotBanned(ctx, club, userId);
+    await validateUserNotBanned(ctx, club._id, userId);
     await validateEventAccess(ctx, event, userId);
     validateEventStatusForJoinLeave(event);
 
     const timeslot = getTimeslotOrThrow(event, args.timeslotId);
     const isWaitlisted = shouldUserBeWaitlisted(timeslot);
 
-    return await ctx.db.insert("eventParticipants", {
-      userId: ctx.currentUser._id,
-      joinedAt: Date.now(),
-      eventId: args.eventId,
-      timeslotId: args.timeslotId,
-      isWaitlisted,
-      date: event.date,
-    });
+    const eventParticipation = await ctx
+      .table("eventParticipants")
+      .insert({
+        userId: ctx.currentUser._id,
+        joinedAt: Date.now(),
+        eventId: args.eventId,
+        timeslotId: args.timeslotId,
+        isWaitlisted,
+        date: event.date,
+      })
+      .get();
+    return eventParticipation;
   },
 });
 
@@ -364,11 +372,10 @@ export const joinEvent = authenticatedMutationWithRLS()({
  * @param timeslotId - ID of the timeslot to leave
  * @throws {ConvexError} When user not participating or event already started
  */
-export const leaveEvent = authenticatedMutationWithRLS()({
+export const leaveEvent = authenticatedMutation()({
   args: { eventId: zid("events"), timeslotId: z.string() },
-  returns: z.null(),
-  handler: async (ctx, args): Promise<null> => {
-    const event = await getOrThrow(ctx, args.eventId);
+  handler: async (ctx, args): Promise<void> => {
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
     const timeslot = getTimeslotOrThrow(event, args.timeslotId);
 
     const userParticipation = await findUserParticipationByTimeslotId(
@@ -379,16 +386,14 @@ export const leaveEvent = authenticatedMutationWithRLS()({
     );
 
     if (!userParticipation) {
-      return null;
+      return;
     }
 
     // Validate event status
     validateEventStatusForJoinLeave(event);
 
-    await ctx.db.delete(userParticipation._id);
+    await ctx.table("eventParticipants").getX(userParticipation._id).delete();
     await promoteWaitlistedParticipant(ctx, args.eventId, args.timeslotId, timeslot);
-
-    return null;
   },
 });
 
@@ -413,7 +418,7 @@ export const _generateEventsForSeries = internalMutation({
   },
   handler: async (ctx, { eventSeriesId, range }) => {
     const { startDate, endDate } = range;
-    const series = await getOrThrow(ctx, eventSeriesId);
+    const series = await dtoGetEventSeriesOrThrow(ctx, eventSeriesId);
     const finalEndDate = Math.min(endDate, series.schedule.endDate);
     const dates = generateUpcomingEventDates(series, startDate, finalEndDate);
     const events = await Promise.all(
@@ -437,8 +442,9 @@ export const _updateEventStatus = internalMutation({
     eventId: v.id("events"),
     status: zodToConvex(eventStatusSchema),
   },
+  returns: zodOutputToConvex(z.object(withSystemFields("events", eventSchema.shape))),
   handler: async (ctx, { eventId, status }) => {
-    await ctx.db.patch(eventId, { status });
+    return await ctx.table("events").getX(eventId).patch({ status }).get();
   },
 });
 
@@ -450,49 +456,8 @@ export const _deactivateEventSeries = internalMutation({
   args: {
     eventSeriesId: v.id("eventSeries"),
   },
+  returns: zodOutputToConvex(z.object(withSystemFields("eventSeries", eventSeriesSchema.shape))),
   handler: async (ctx, { eventSeriesId }) => {
-    await ctx.db.patch(eventSeriesId, { isActive: false });
+    return await ctx.table("eventSeries").getX(eventSeriesId).patch({ isActive: false }).get();
   },
 });
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-export const getOrCreateEventFromSeries = async (
-  ctx: MutationCtx,
-  series: EventSeries,
-  date: number,
-): Promise<Event> => {
-  let event = await dtoGetEventAtDate(ctx, series._id, date);
-  if (!event) {
-    const eventInput = { ...eventCreateInputSchema.parse(series), date };
-    const eventId = await dtoCreateEvent(ctx, series.createdBy, eventInput, series._id);
-    event = await getOrThrow(ctx, eventId);
-  }
-  return event;
-};
-
-export const getOrCreatePermanentParticipants = async (
-  ctx: MutationCtx,
-  event: Event,
-): Promise<Array<Id<"eventParticipants">>> => {
-  const existingParticipants = await dtoListAllEventParticipants(ctx, event._id);
-  const participants = event.timeslots.flatMap((timeslot) =>
-    timeslot.permanentParticipants.map(async (userId) => {
-      const existingParticipation = existingParticipants.find((p) => p.userId === userId);
-      if (existingParticipation) {
-        return existingParticipation._id;
-      }
-      return await ctx.db.insert("eventParticipants", {
-        userId,
-        joinedAt: event.date,
-        eventId: event._id,
-        timeslotId: timeslot.id,
-        isWaitlisted: false,
-        date: event.date,
-      });
-    }),
-  );
-  return Promise.all(participants);
-};

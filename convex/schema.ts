@@ -1,21 +1,22 @@
 import { authTables } from "@convex-dev/auth/server";
-import { defineSchema, defineTable } from "convex/server";
+import { defineEnt, defineEntSchema, defineEntsFromTables, getEntDefinitions } from "convex-ents";
 import { v } from "convex/values";
 import { activityTables } from "./service/activities/schemas";
 import { clubTables } from "./service/clubs/schemas";
 import { eventTables } from "./service/events/schemas";
 import { userTables } from "./service/users/schemas";
 
-// The schema is normally optional, but Convex Auth
-// requires indexes defined on `authTables`.
-// The schema provides more precise TypeScript types.
-export default defineSchema({
-  ...authTables,
+const schema = defineEntSchema({
+  ...defineEntsFromTables(authTables),
   ...userTables,
   ...clubTables,
   ...activityTables,
   ...eventTables,
-  numbers: defineTable({
+  numbers: defineEnt({
     value: v.number(),
   }),
 });
+
+export default schema;
+
+export const entDefinitions = getEntDefinitions(schema);

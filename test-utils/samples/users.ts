@@ -1,12 +1,11 @@
 import { Id } from "@/convex/_generated/dataModel";
-import schema from "@/convex/schema";
 import {
   User,
   UserDetails,
   UserDetailsWithProfile,
   UserProfile,
 } from "@/convex/service/users/schemas";
-import { TestConvex } from "convex-test";
+import { convexTest } from "@/convex/setup.testing";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
 
@@ -64,27 +63,25 @@ export const createTestUserRecord = <T extends CreateTestUserArgs>(
 };
 
 export class UserTestHelpers {
-  constructor(private t: TestConvex<typeof schema>) {}
+  constructor(private t: ReturnType<typeof convexTest>) {}
+
+  async getUser(userId: Id<"users">) {
+    return await this.t.runWithCtx((ctx) => ctx.table("users").getX(userId));
+  }
 
   async insertUser(email = generateTestEmail()) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("users", { email });
-    });
+    return await this.t.runWithCtx((ctx) => ctx.table("users").insert({ email }).get());
   }
 
   async deleteUser(userId: Id<"users">) {
-    return await this.t.run(async (ctx) => ctx.db.delete(userId));
+    return await this.t.runWithCtx((ctx) => ctx.table("users").getX(userId).delete());
   }
 
   async insertProfile(profile: WithoutSystemFields<UserProfile>) {
-    return await this.t.run(async (ctx) => {
-      return await ctx.db.insert("userProfiles", {
-        ...profile,
-      });
-    });
+    return await this.t.runWithCtx((ctx) => ctx.table("userProfiles").insert(profile).get());
   }
 
   async getProfile(profileId: Id<"userProfiles">) {
-    return await this.t.run(async (ctx) => ctx.db.get(profileId));
+    return await this.t.runWithCtx((ctx) => ctx.table("userProfiles").getX(profileId));
   }
 }

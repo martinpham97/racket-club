@@ -29,8 +29,9 @@ import {
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
 import { isEventDateRangeValid } from "@/convex/service/utils/validators/events";
+import { defineEnt } from "convex-ents";
 import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
-import { defineTable, DocumentByName } from "convex/server";
+import { DocumentByName } from "convex/server";
 import z from "zod";
 
 const locationSchema = z.object({
@@ -152,6 +153,7 @@ export const eventStatusSchema = z.enum([
 export const eventSeriesSchema = baseEventSchema.extend({
   schedule: scheduleSchema,
   isActive: z.boolean(),
+  onSeriesEndFunctionId: zid("_scheduled_functions").optional(),
 });
 
 export const eventSchema = baseEventSchema.extend({
@@ -159,6 +161,8 @@ export const eventSchema = baseEventSchema.extend({
   date: z.number(),
   timeslots: z.array(timeslotSchema).min(1),
   status: eventStatusSchema,
+  onEventStartFunctionId: zid("_scheduled_functions").optional(),
+  onEventEndFunctionId: zid("_scheduled_functions").optional(),
 });
 
 export const eventParticipantSchema = z.object({
@@ -237,19 +241,45 @@ export type EventFilters = z.infer<typeof eventFiltersSchema>;
 export type EventParticipantDetails = z.infer<typeof eventParticipantDetailsSchema>;
 export type EventDetails = z.infer<typeof eventDetailsSchema>;
 
-export const eventSeriesTable = defineTable(zodToConvex(eventSeriesSchema)).index("clubId", [
-  "clubId",
-]);
+export const eventSeriesTable = defineEnt(zodToConvex(eventSeriesSchema))
+  .index("clubId", ["clubId"])
+  .edge("club", { to: "clubs", field: "clubId" })
+  .edge("createdBy", { to: "users", field: "createdBy" })
+  .edge("onSeriesEndFunction", {
+    to: "_scheduled_functions",
+    field: "onSeriesEndFunctionId",
+    optional: true,
+    deletion: "hard",
+  })
+  .edges("events", { to: "events", ref: "eventSeriesId" });
 
-export const eventTable = defineTable(zodToConvex(eventSchema))
+export const eventTable = defineEnt(zodToConvex(eventSchema))
   .index("clubDate", ["clubId", "date"])
   .index("eventSeriesDate", ["eventSeriesId", "date"])
-  .index("date", ["date"]);
+  .index("date", ["date"])
+  .edge("club", { to: "clubs", field: "clubId" })
+  .edge("eventSeries", { to: "eventSeries", field: "eventSeriesId", optional: true })
+  .edge("createdBy", { to: "users", field: "createdBy" })
+  .edges("participants", { to: "eventParticipants", ref: "eventId" })
+  .edge("onEventStartFunction", {
+    to: "_scheduled_functions",
+    field: "onEventStartFunctionId",
+    optional: true,
+    deletion: "hard",
+  })
+  .edge("onEventEndFunction", {
+    to: "_scheduled_functions",
+    field: "onEventEndFunctionId",
+    optional: true,
+    deletion: "hard",
+  });
 
-export const eventParticipantTable = defineTable(zodToConvex(eventParticipantSchema))
+export const eventParticipantTable = defineEnt(zodToConvex(eventParticipantSchema))
   .index("eventId", ["eventId"])
   .index("userDate", ["userId", "date"])
-  .index("eventUser", ["eventId", "userId"]);
+  .index("eventUser", ["eventId", "userId"])
+  .edge("event", { to: "events", field: "eventId" })
+  .edge("user", { to: "users", field: "userId" });
 
 export const eventTables = {
   eventSeries: eventSeriesTable,

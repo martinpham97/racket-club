@@ -4,8 +4,9 @@ import {
   preferredPlayStyleSchema,
   skillLevelSchema,
 } from "@/convex/service/users/schemas";
+import { defineEnt } from "convex-ents";
 import { withSystemFields, zid, zodToConvex } from "convex-helpers/server/zod";
-import { defineTable, DocumentByName } from "convex/server";
+import { DocumentByName } from "convex/server";
 import z from "zod";
 
 export const clubSchema = z.object({
@@ -56,6 +57,7 @@ export const clubBanReasonSchema = z
   .string()
   .min(10, "Ban reason must be at least 10 characters.")
   .max(500, "Ban reason must be less than 500 characters.");
+
 export const clubBanSchema = z.object({
   clubId: zid("clubs"),
   userId: zid("users"),
@@ -104,19 +106,25 @@ export type ClubMembership = DocumentByName<DataModel, "clubMemberships">;
 export type ClubBan = DocumentByName<DataModel, "clubBans">;
 export type ClubDetails = z.infer<typeof clubDetailsSchema>;
 
-export const clubTable = defineTable(zodToConvex(clubSchema))
-  .index("publicApproved", ["isPublic", "isApproved"])
-  .index("publicName", ["isPublic", "name"]);
+export const clubTable = defineEnt(zodToConvex(clubSchema))
+  .index("publicApprovedName", ["isPublic", "isApproved", "name"])
+  .index("publicName", ["isPublic", "name"])
+  .edge("createdBy", { to: "users", field: "createdBy" })
+  .edges("memberships", { to: "clubMemberships", ref: "clubId" })
+  .edges("clubBanRecords", { to: "clubBans", ref: "clubId" })
+  .edges("events", { to: "events", ref: "clubId" })
+  .edges("eventSeries", { to: "eventSeries", ref: "clubId" });
 
-export const clubMembershipTable = defineTable(zodToConvex(clubMembershipSchema))
-  .index("clubApproved", ["clubId", "isApproved"])
-  .index("userId", ["userId"])
-  .index("clubUser", ["clubId", "userId"]);
+export const clubMembershipTable = defineEnt(zodToConvex(clubMembershipSchema))
+  .index("userClub", ["userId", "clubId"])
+  .edge("club", { to: "clubs", field: "clubId" })
+  .edge("user", { to: "users", field: "userId" });
 
-export const clubBanTable = defineTable(zodToConvex(clubBanSchema))
-  .index("clubUser", ["clubId", "userId"])
-  .index("clubActive", ["clubId", "isActive"])
-  .index("userId", ["userId"]);
+export const clubBanTable = defineEnt(zodToConvex(clubBanSchema))
+  .index("activeClubUser", ["isActive", "clubId", "userId"])
+  .edge("club", { to: "clubs", field: "clubId" })
+  .edge("user", { to: "users", field: "userId" })
+  .edge("bannedBy", { to: "users", field: "bannedBy" });
 
 export const clubTables = {
   clubs: clubTable,

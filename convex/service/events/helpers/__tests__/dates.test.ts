@@ -1,10 +1,10 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
-import { generateUpcomingEventDates } from "../dates";
+import { generateUpcomingEventDates } from "@/convex/service/events/helpers/dates";
 import { createTestEventSeriesRecord } from "@/test-utils/samples/events";
 import { createTestUserRecord } from "@/test-utils/samples/users";
 import { addDays } from "date-fns";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Date Helpers", () => {
   beforeEach(() => {
@@ -21,7 +21,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01").getTime();
       const endDate = new Date("2024-01-31").getTime();
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -48,7 +48,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01").getTime();
       const endDate = addDays(new Date("2024-01-01"), MAX_EVENT_GENERATION_DAYS + 30).getTime();
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -68,7 +68,7 @@ describe("Date Helpers", () => {
 
       // Should not exceed MAX_EVENT_GENERATION_DAYS
       const maxExpectedDate = addDays(new Date(startDate), MAX_EVENT_GENERATION_DAYS).getTime();
-      dates.forEach(date => {
+      dates.forEach((date) => {
         expect(date).toBeLessThanOrEqual(maxExpectedDate);
       });
     });
@@ -77,7 +77,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01").getTime();
       const endDate = new Date("2024-02-29").getTime();
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -103,7 +103,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01").getTime();
       const endDate = new Date("2024-01-07").getTime();
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -128,7 +128,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01T00:00:00Z").getTime();
       const endDate = new Date("2024-01-07T23:59:59Z").getTime();
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -148,7 +148,7 @@ describe("Date Helpers", () => {
 
       expect(dates.length).toBeGreaterThan(0);
       // Dates should be valid timestamps
-      dates.forEach(date => {
+      dates.forEach((date) => {
         expect(typeof date).toBe("number");
         expect(date).toBeGreaterThan(0);
       });
@@ -158,7 +158,7 @@ describe("Date Helpers", () => {
       const user = createTestUserRecord();
       const startDate = new Date("2024-01-01").getTime();
       const endDate = new Date("2024-01-14").getTime(); // Short period
-      
+
       const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
         schedule: {
           startDate,
@@ -177,7 +177,7 @@ describe("Date Helpers", () => {
       const dates = generateUpcomingEventDates(series, startDate, endDate);
 
       // Should respect the shorter end date
-      dates.forEach(date => {
+      dates.forEach((date) => {
         expect(date).toBeLessThanOrEqual(endDate);
       });
     });

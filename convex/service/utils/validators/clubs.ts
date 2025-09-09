@@ -1,17 +1,21 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { QueryCtx } from "@/convex/_generated/server";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   CLUB_FULL_ERROR,
-  CLUB_MEMBERSHIP_NOT_FOUND_ERROR,
+  CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR,
+  CLUB_MEMBERSHIP_REQUIRED_ERROR,
   CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR,
   CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR,
   CLUB_PUBLIC_UNAPPROVED_ERROR,
   CLUB_USER_BANNED_ERROR,
 } from "@/convex/constants/errors";
-import { getClubBanRecordForUser, getClubMembershipForUser } from "@/convex/service/clubs/database";
+import { AuthenticatedWithProfileCtx } from "@/convex/functions";
+import {
+  getActiveClubBanRecordForUser,
+  getClubMembershipForUser,
+} from "@/convex/service/clubs/database";
 import { Club, ClubMembership, ClubUpdateInput } from "@/convex/service/clubs/schemas";
-import { AuthenticatedWithProfileCtx } from "@/convex/service/utils/functions";
+import { QueryCtx } from "@/convex/types";
 import { ConvexError } from "convex/values";
 import { isOwnerOrSystemAdmin } from "./auth";
 
@@ -52,10 +56,7 @@ export const enforceClubMembershipPermissions = async (
   }
 
   // Club admin (approved) can manage their club
-  const membership = await ctx.db
-    .query("clubMemberships")
-    .withIndex("clubUser", (q) => q.eq("clubId", club._id).eq("userId", ctx.currentUser._id))
-    .unique();
+  const membership = await getClubMembershipForUser(ctx, club._id, ctx.currentUser._id);
 
   if (membership?.isApproved && membership?.isClubAdmin) {
     return;
@@ -72,10 +73,9 @@ export const enforceClubMembershipPermissions = async (
  */
 export const validateClubName = async (ctx: QueryCtx, name: string, isPublic: boolean) => {
   if (isPublic) {
-    const clubWithSameName = await ctx.db
-      .query("clubs")
-      .withIndex("publicName", (q) => q.eq("isPublic", true).eq("name", name))
-      .first();
+    const clubWithSameName = await ctx
+      .table("clubs", "publicName", (q) => q.eq("isPublic", true).eq("name", name))
+      .unique();
     if (clubWithSameName) {
       throw new ConvexError(CLUB_PUBLIC_SAME_NAME_ALREADY_EXISTS_ERROR);
     }
@@ -112,14 +112,21 @@ export const validateClubUpdateInput = async (
 };
 
 /**
- * Validates that a membership exists and throws an error if not.
- * @param membership - The membership to validate
- * @returns The validated membership
- * @throws ConvexError when membership is null
+ * Validates that a club membership exists for the given user and club.
+ * @param ctx Query context
+ * @param clubId Club ID to check membership for
+ * @param userId User ID to check membership for
+ * @returns The validated club membership
+ * @throws ConvexError when membership does not exist
  */
-export const validateMembershipExists = (membership: ClubMembership | null): ClubMembership => {
+export const validateClubMembershipExists = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+  userId: Id<"users">,
+): Promise<ClubMembership> => {
+  const membership = await getClubMembershipForUser(ctx, clubId, userId);
   if (!membership) {
-    throw new ConvexError(CLUB_MEMBERSHIP_NOT_FOUND_ERROR);
+    throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
   }
   return membership;
 };
@@ -127,40 +134,43 @@ export const validateMembershipExists = (membership: ClubMembership | null): Clu
 /**
  * Validates that a club can be joined by checking capacity and approval status.
  * @param club - The club to validate
- * @throws ConvexError when club is full or public but unapproved
+ * @throws {ConvexError} when club is full or public but unapproved
  */
 export const validateClubJoinability = (club: Club) => {
-  if (club.numMembers >= club.maxMembers) {
-    throw new ConvexError(CLUB_FULL_ERROR);
-  }
   if (club.isPublic && !club.isApproved) {
     throw new ConvexError(CLUB_PUBLIC_UNAPPROVED_ERROR);
+  }
+  if (club.numMembers >= club.maxMembers) {
+    throw new ConvexError(CLUB_FULL_ERROR);
   }
 };
 
 /**
- * Validates and returns memberships for bulk operations.
- * Ensures all memberships exist, belong to the same club, and user has permissions.
+ * Validates and returns memberships within a club for bulk operations.
+ * Ensures all memberships exist and belong to the same club.
  * @param ctx - Query context
  * @param membershipIds - Array of membership IDs to validate
  * @returns Object containing validated memberships and club ID
- * @throws ConvexError when memberships are from different clubs or user lacks permissions
+ * @throws {ConvexError} When memberships are from different clubs
  */
 export const validateBulkMemberships = async (
   ctx: QueryCtx,
   membershipIds: Id<"clubMemberships">[],
 ): Promise<{ memberships: ClubMembership[]; clubId: Id<"clubs"> | null }> => {
-  if (membershipIds.length === 0) return { memberships: [], clubId: null };
-
   const uniqueIds = [...new Set(membershipIds)];
-  const memberships = await Promise.all(uniqueIds.map((id) => ctx.db.get(id)));
-  const validMemberships = memberships.filter(Boolean) as ClubMembership[];
+  if (uniqueIds.length === 0) {
+    return { memberships: [], clubId: null };
+  }
 
-  if (validMemberships.length === 0) return { memberships: [], clubId: null };
+  const memberships = await ctx.table("clubMemberships").getMany(uniqueIds);
+  const validMemberships = memberships.filter(Boolean) as Array<ClubMembership>;
+
+  if (validMemberships.length === 0) {
+    return { memberships: [], clubId: null };
+  }
 
   const clubId = validMemberships[0].clubId;
-  const allSameClub = validMemberships.every((m) => m.clubId === clubId);
-  if (!allSameClub) {
+  if (!validMemberships.every((m) => m.clubId === clubId)) {
     throw new ConvexError(CLUB_MEMBERSHIPS_MUST_BE_FROM_SAME_CLUB_ERROR);
   }
 
@@ -170,17 +180,65 @@ export const validateBulkMemberships = async (
 /**
  * Validates that a user is not banned from a club
  * @param ctx Query context
- * @param club Club to check ban status for
+ * @param clubId Club ID to validate
  * @param userId User ID to validate
  * @throws ConvexError When user is banned from the club
  */
 export const validateUserNotBanned = async (
   ctx: QueryCtx,
-  club: Club,
+  clubId: Id<"clubs">,
   userId: Id<"users">,
 ): Promise<void> => {
-  const ban = await getClubBanRecordForUser(ctx, club._id, userId);
+  const ban = await getActiveClubBanRecordForUser(ctx, clubId, userId);
   if (ban) {
     throw new ConvexError(CLUB_USER_BANNED_ERROR);
   }
+};
+
+/**
+ * Validates that a club membership does not already exist for the given user and club.
+ * @param ctx Query context
+ * @param clubId Club ID to check membership for
+ * @param userId User ID to check membership for
+ * @throws ConvexError when membership already exists
+ */
+export const validateMembershipDoesNotExist = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+  userId: Id<"users">,
+): Promise<void> => {
+  const existingMembership = await getClubMembershipForUser(ctx, clubId, userId);
+  if (existingMembership) {
+    throw new ConvexError(CLUB_MEMBERSHIP_ALREADY_EXISTS_ERROR);
+  }
+};
+
+/**
+ * Validates that a club membership exists for the given user and club.
+ * @param ctx Query context
+ * @param clubId Club ID to check membership for
+ * @param userId User ID to check membership for
+ * @returns Club membership details
+ * @throws ConvexError when membership does not exists
+ */
+export const validateMembershipExists = async (
+  ctx: QueryCtx,
+  clubId: Id<"clubs">,
+  userId: Id<"users">,
+): Promise<ClubMembership> => {
+  const existingMembership = await getClubMembershipForUser(ctx, clubId, userId);
+  if (!existingMembership) {
+    throw new ConvexError(CLUB_MEMBERSHIP_REQUIRED_ERROR);
+  }
+  return existingMembership;
+};
+
+/**
+ * Checks if a user is the owner of a club.
+ * @param club The club to check
+ * @param userId ID of the user to check
+ * @returns True if the user is the club owner
+ */
+export const isClubOwner = (club: Club, userId: Id<"users">): boolean => {
+  return club.createdBy === userId;
 };

@@ -1,12 +1,12 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import z from "zod";
-import { authenticatedMutationWithRLS, publicQueryWithRLS } from "./service/utils/functions";
+import { authenticatedMutation, publicQuery } from "./service/utils/functions";
 
 // Write your Convex functions in any file inside this directory (`convex`).
 // See https://docs.convex.dev/functions for more.
 
 // You can read data from the database via a query:
-export const listNumbers = publicQueryWithRLS()({
+export const listNumbers = publicQuery()({
   // Validators for arguments.
   args: {
     count: z.number().nonnegative(),
@@ -31,7 +31,7 @@ export const listNumbers = publicQueryWithRLS()({
 });
 
 // You can write data to the database via a mutation:
-export const addNumber = authenticatedMutationWithRLS()({
+export const addNumber = authenticatedMutation()({
   // Validators for arguments.
   args: {
     value: z.number(),

@@ -1,5 +1,5 @@
+import { getMetadata } from "@/convex/service/utils/metadata";
 import { describe, expect, it } from "vitest";
-import { getMetadata } from "../metadata";
 
 describe("getMetadata", () => {
   it("returns empty array when no changes", () => {
