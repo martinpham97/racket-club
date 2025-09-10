@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import z from "zod";
-import { authenticatedMutation, publicQuery } from "./service/utils/functions";
+import { authenticatedMutation, publicQuery } from "./functions";
 
 // Write your Convex functions in any file inside this directory (`convex`).
 // See https://docs.convex.dev/functions for more.
@@ -16,13 +16,13 @@ export const listNumbers = publicQuery()({
   handler: async (ctx, args) => {
     //// Read the database as many times as you need here.
     //// See https://docs.convex.dev/database/reading-data.
-    const numbers = await ctx.db
-      .query("numbers")
+    const numbers = await ctx
+      .table("numbers")
       // Ordered by _creationTime, return most recent
       .order("desc")
       .take(args.count);
     const userId = await getAuthUserId(ctx);
-    const user = userId === null ? null : await ctx.db.get(userId);
+    const user = userId === null ? null : await ctx.table("users").get(userId);
     return {
       viewer: user?.email ?? null,
       numbers: numbers.reverse().map((number) => number.value),
@@ -43,7 +43,7 @@ export const addNumber = authenticatedMutation()({
     //// Mutations can also read from the database like queries.
     //// See https://docs.convex.dev/database/writing-data.
 
-    const id = await ctx.db.insert("numbers", { value: args.value });
+    const id = await ctx.table("numbers").insert({ value: args.value });
 
     console.log("Added new document with id:", id);
     // Optionally, return a value from your mutation.

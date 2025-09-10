@@ -7,6 +7,7 @@ import {
   USER_PROFILE_REQUIRED_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
+import { Activity } from "@/convex/service/activities/schemas";
 import { convexTest } from "@/convex/setup.testing";
 import { ActivityTestHelpers } from "@/test-utils/samples/activities";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
@@ -66,11 +67,11 @@ describe("User Functions", () => {
       expect(createdProfile).toEqual(expect.objectContaining(profile));
 
       // Validate profile creation activity was created
-      const activities = await activityHelpers.getActivitiesForResource(profileId);
+      const activities = await activityHelpers.getActivitiesForUser(userId);
       expect(activities).toHaveLength(1);
       expect(activities[0]).toEqual(
         expect.objectContaining({
-          resourceId: profileId,
+          userId: userId,
           type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         }),
       );
@@ -151,10 +152,12 @@ describe("User Functions", () => {
       expect(updatedProfile).toEqual(expect.objectContaining({ ...profile, firstName: "Updated" }));
 
       // Validate profile update activity was created
-      const activities = await activityHelpers.getActivitiesForResource(profileId);
-      const updateActivity = activities.find((a) => a.type === ACTIVITY_TYPES.USER_PROFILE_UPDATED);
+      const activities = await activityHelpers.getActivitiesForUser(userId);
+      const updateActivity = activities.find(
+        (a: Activity) => a.type === ACTIVITY_TYPES.USER_PROFILE_UPDATED,
+      );
       expect(updateActivity).toBeDefined();
-      expect(updateActivity?.resourceId).toBe(profileId);
+      expect(updateActivity?.userId).toBe(userId);
     });
 
     it("allows admin to update any profile", async () => {
@@ -394,13 +397,11 @@ describe("User Functions", () => {
     it("lists user activities", async () => {
       const user = await helpers.insertUser();
       const userId = user._id;
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       // Create some activities
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         date: Date.now(),
         createdAt: Date.now(),
@@ -414,7 +415,7 @@ describe("User Functions", () => {
       expect(result.page).toHaveLength(1);
       expect(result.page[0]).toEqual(
         expect.objectContaining({
-          resourceId: profileId,
+          userId: userId,
           type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         }),
       );
@@ -439,20 +440,17 @@ describe("User Functions", () => {
     it("returns user activities when user requests their own", async () => {
       const user = await helpers.insertUser();
       const userId = user._id;
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       // Insert test activities
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdAt: Date.now(),
         date: Date.now(),
       });
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
         createdAt: Date.now(),
         date: Date.now(),
@@ -476,12 +474,10 @@ describe("User Functions", () => {
       const user = await helpers.insertUser("user@example.com");
       const userId = user._id;
       await helpers.insertProfile({ ...createTestProfile(adminId), isAdmin: true });
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdAt: Date.now(),
         date: Date.now(),
@@ -495,21 +491,18 @@ describe("User Functions", () => {
 
       expect(result).toBeDefined();
       expect(result.page).toHaveLength(1);
-      expect(result.page[0].resourceId).toBe(profileId);
-      expect(result.page[0].relatedId).toBe(userId);
+      expect(result.page[0].userId).toBe(userId);
     });
 
     it("respects pagination numItems limit", async () => {
       const user = await helpers.insertUser();
       const userId = user._id;
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       // Create multiple activities
       for (let i = 0; i < 5; i++) {
         await activityHelpers.insertActivity({
-          resourceId: profileId,
-          relatedId: userId,
+          userId: userId,
           type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
           createdAt: Date.now() + i,
           date: Date.now() + i,
@@ -564,13 +557,11 @@ describe("User Functions", () => {
     it("lists user activities", async () => {
       const user = await helpers.insertUser();
       const userId = user._id;
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       // Create some activities
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         date: Date.now(),
         createdAt: Date.now(),
@@ -584,7 +575,7 @@ describe("User Functions", () => {
       expect(result.page).toHaveLength(1);
       expect(result.page[0]).toEqual(
         expect.objectContaining({
-          resourceId: profileId,
+          userId: userId,
           type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         }),
       );
@@ -609,20 +600,17 @@ describe("User Functions", () => {
     it("returns user activities when user requests their own", async () => {
       const user = await helpers.insertUser();
       const userId = user._id;
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       // Insert test activities
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdAt: Date.now(),
         date: Date.now(),
       });
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
         createdAt: Date.now(),
         date: Date.now(),
@@ -662,12 +650,10 @@ describe("User Functions", () => {
       const user = await helpers.insertUser("user@example.com");
       const userId = user._id;
       await helpers.insertProfile(createTestProfile(adminId, { isAdmin: true }));
-      const profile = await helpers.insertProfile(createTestProfile(userId));
-      const profileId = profile._id;
+      await helpers.insertProfile(createTestProfile(userId));
 
       await activityHelpers.insertActivity({
-        resourceId: profileId,
-        relatedId: userId,
+        userId: userId,
         type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
         createdAt: Date.now(),
         date: Date.now(),
@@ -681,8 +667,7 @@ describe("User Functions", () => {
 
       expect(result).toBeDefined();
       expect(result.page).toHaveLength(1);
-      expect(result.page[0].resourceId).toBe(profileId);
-      expect(result.page[0].relatedId).toBe(userId);
+      expect(result.page[0].userId).toBe(userId);
     });
   });
 });

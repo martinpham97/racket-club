@@ -19,17 +19,6 @@ export const convexTest = <Schema extends GenericEntSchema>(
   };
 };
 
-// // Use inside t.run() to use Ents
-// export const runCtx = async (ctx: MutationCtx & { storage: StorageActionWriter }) => {
-//   const { db, ...restCtx } = ctx;
-//   return {
-//     ...restCtx,
-//     table: entsTableFactory(ctx, entDefinitions),
-//     db: undefined,
-//     UNSAFE_DB: db,
-//   };
-// };
-
 // Helper to create runWithCtx for a test instance
 export const createRunWithCtx = (t: {
   run: <T>(fn: (ctx: MutationCtx & { storage: StorageActionWriter }) => Promise<T>) => Promise<T>;

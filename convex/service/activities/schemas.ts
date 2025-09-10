@@ -5,19 +5,6 @@ import { zid, zodToConvex } from "convex-helpers/server/zod";
 import { DocumentByName } from "convex/server";
 import z from "zod";
 
-export const resourceIdSchema = z.union([
-  zid("clubs"),
-  zid("clubMemberships"),
-  zid("users"),
-  zid("userProfiles"),
-  zid("events"),
-  zid("eventSeries"),
-  zid("eventParticipants"),
-  zid("_scheduled_functions"),
-]);
-
-export type ResourceId = z.infer<typeof resourceIdSchema>;
-
 export const activityMetadataSchema = z.array(
   z.object({
     previousValue: z.string().optional(),
@@ -25,13 +12,14 @@ export const activityMetadataSchema = z.array(
     fieldChanged: z.string().optional(),
   }),
 );
+
 export const activitySchema = z.object({
-  resourceId: resourceIdSchema,
-  relatedId: resourceIdSchema.optional(),
+  userId: zid("users").optional(),
+  clubId: zid("clubs").optional(),
+  eventId: zid("events").optional(),
+  eventSeriesId: zid("eventSeries").optional(),
   type: z.enum(activityTypes as [string, ...string[]]),
-  createdBy: zid("users").optional(),
   createdAt: z.number(),
-  scheduledAt: z.number().optional(),
   date: z.number(),
   metadata: activityMetadataSchema.optional(),
 });
@@ -46,10 +34,18 @@ export type ActivityMetadata = z.infer<typeof activityMetadataSchema>;
 export type ActivityCreateInput = z.infer<typeof activityInputSchema>;
 
 export const activityTable = defineEnt(zodToConvex(activitySchema))
-  .index("resourceType", ["resourceId", "type"])
-  .index("resourceDate", ["resourceId", "date"])
-  .index("resourceTypeScheduledAt", ["resourceId", "type", "scheduledAt"])
-  .index("relatedId", ["relatedId"]);
+  .edge("user", { to: "users", field: "userId", optional: true })
+  .edge("club", { to: "clubs", field: "clubId", optional: true })
+  .edge("event", { to: "events", field: "eventId", optional: true })
+  .edge("eventSeries", { to: "eventSeries", field: "eventSeriesId", optional: true })
+  .index("userType", ["userId", "type"])
+  .index("userDate", ["userId", "date"])
+  .index("clubType", ["clubId", "type"])
+  .index("clubDate", ["clubId", "date"])
+  .index("eventType", ["eventId", "type"])
+  .index("eventDate", ["eventId", "date"])
+  .index("eventSeriesType", ["eventSeriesId", "type"])
+  .index("eventSeriesDate", ["eventSeriesId", "date"]);
 
 export const activityTables = {
   activities: activityTable,

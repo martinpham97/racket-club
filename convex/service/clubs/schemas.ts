@@ -113,7 +113,8 @@ export const clubTable = defineEnt(zodToConvex(clubSchema))
   .edges("memberships", { to: "clubMemberships", ref: "clubId" })
   .edges("clubBanRecords", { to: "clubBans", ref: "clubId" })
   .edges("events", { to: "events", ref: "clubId" })
-  .edges("eventSeries", { to: "eventSeries", ref: "clubId" });
+  .edges("eventSeries", { to: "eventSeries", ref: "clubId" })
+  .edges("activities", { to: "activities", ref: "clubId" });
 
 export const clubMembershipTable = defineEnt(zodToConvex(clubMembershipSchema))
   .index("userClub", ["userId", "clubId"])

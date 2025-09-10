@@ -14,7 +14,6 @@ import { ClubTestHelpers, createTestClub } from "@/test-utils/samples/clubs";
 import {
   createTestEvent,
   createTestEventParticipant,
-  createTestEventSeries,
   createTestTimeslot,
   EventTestHelpers,
 } from "@/test-utils/samples/events";
@@ -40,11 +39,9 @@ describe("Timeslot Helpers", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-      const seriesId = series._id;
 
       const timeslot = createTestTimeslot({ id: "slot1" });
-      const eventData = createTestEvent(seriesId, clubId, userId, Date.now(), {
+      const eventData = createTestEvent(clubId, userId, Date.now(), {
         timeslots: [timeslot],
       });
       const event = await eventHelpers.insertEvent(eventData);
@@ -60,10 +57,8 @@ describe("Timeslot Helpers", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-      const seriesId = series._id;
 
-      const eventData = createTestEvent(seriesId, clubId, userId, Date.now(), { timeslots: [] });
+      const eventData = createTestEvent(clubId, userId, Date.now(), { timeslots: [] });
       const event = await eventHelpers.insertEvent(eventData);
       const eventId = event._id;
       const eventRecord = await eventHelpers.getEvent(eventId);
@@ -107,11 +102,7 @@ describe("Timeslot Helpers", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-      const seriesId = series._id;
-      const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, Date.now()),
-      );
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
       const eventId = event._id;
 
       const participantData = createTestEventParticipant(eventId, userId, "slot1", Date.now(), {
@@ -132,11 +123,7 @@ describe("Timeslot Helpers", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-      const seriesId = series._id;
-      const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, Date.now()),
-      );
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
       const eventId = event._id;
 
       const result = await t.runWithCtx(async (ctx) => {
@@ -153,12 +140,10 @@ describe("Timeslot Helpers", () => {
       const userId1 = user1._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId1));
-      const seriesId = series._id;
 
       const timeslot = createTestTimeslot({ maxParticipants: 10, id: "slot1" });
       const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, Date.now(), { timeslots: [timeslot] }),
+        createTestEvent(clubId, userId1, Date.now(), { timeslots: [timeslot] }),
       );
       const eventId = event._id;
 
@@ -186,12 +171,10 @@ describe("Timeslot Helpers", () => {
       const userId3 = user3._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId1));
-      const seriesId = series._id;
 
       const timeslot = createTestTimeslot({ maxParticipants: 10, id: "slot1" });
       const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, Date.now(), { timeslots: [timeslot] }),
+        createTestEvent(clubId, userId1, Date.now(), { timeslots: [timeslot] }),
       );
       const eventId = event._id;
 
@@ -233,12 +216,10 @@ describe("Timeslot Helpers", () => {
       const userId3 = user3._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId1));
-      const seriesId = series._id;
 
       const timeslot = createTestTimeslot({ maxParticipants: 2, id: "slot1" });
       const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, Date.now(), { timeslots: [timeslot] }),
+        createTestEvent(clubId, userId1, Date.now(), { timeslots: [timeslot] }),
       );
       const eventId = event._id;
 
@@ -269,12 +250,10 @@ describe("Timeslot Helpers", () => {
       const userId1 = user1._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId1));
-      const seriesId = series._id;
 
       const timeslot = createTestTimeslot({ maxParticipants: 10, id: "slot1" });
       const event = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, Date.now(), { timeslots: [timeslot] }),
+        createTestEvent(clubId, userId1, Date.now(), { timeslots: [timeslot] }),
       );
       const eventId = event._id;
 

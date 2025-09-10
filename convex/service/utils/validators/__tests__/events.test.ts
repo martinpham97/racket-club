@@ -599,10 +599,8 @@ describe("validateEventStatusForJoinLeave", () => {
     const userId = user._id;
     const club = await clubHelpers.insertClub(createTestClub(userId));
     const clubId = club._id;
-    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await _eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         status: EVENT_STATUS.NOT_STARTED,
       }),
     );
@@ -615,10 +613,8 @@ describe("validateEventStatusForJoinLeave", () => {
     const userId = user._id;
     const club = await clubHelpers.insertClub(createTestClub(userId));
     const clubId = club._id;
-    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await _eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         status: EVENT_STATUS.IN_PROGRESS,
       }),
     );
@@ -633,10 +629,8 @@ describe("validateEventStatusForJoinLeave", () => {
     const userId = user._id;
     const club = await clubHelpers.insertClub(createTestClub(userId));
     const clubId = club._id;
-    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await _eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         status: EVENT_STATUS.COMPLETED,
       }),
     );
@@ -651,10 +645,8 @@ describe("validateEventStatusForJoinLeave", () => {
     const userId = user._id;
     const club = await clubHelpers.insertClub(createTestClub(userId));
     const clubId = club._id;
-    const series = await _eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await _eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         status: EVENT_STATUS.CANCELLED,
       }),
     );
@@ -794,10 +786,8 @@ describe("validateEventAccess", () => {
     const userId = user._id;
     const club = await clubHelpers.insertClub(createTestClub(userId));
     const clubId = club._id;
-    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         visibility: EVENT_VISIBILITY.PUBLIC,
       }),
     );
@@ -817,10 +807,8 @@ describe("validateEventAccess", () => {
     const memberUser = await userHelpers.insertUser("member@test.com");
     const memberUserId = memberUser._id;
     await clubHelpers.insertMembership(createTestClubMembership(clubId, memberUserId));
-    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         visibility: EVENT_VISIBILITY.MEMBERS_ONLY,
       }),
     );
@@ -837,10 +825,8 @@ describe("validateEventAccess", () => {
     const clubId = club._id;
     const nonMemberUser = await userHelpers.insertUser("nonmember@test.com");
     const nonMemberUserId = nonMemberUser._id;
-    const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
-    const seriesId = series._id;
     const event = await eventHelpers.insertEvent(
-      createTestEvent(seriesId, clubId, userId, Date.now(), {
+      createTestEvent(clubId, userId, Date.now(), {
         visibility: EVENT_VISIBILITY.MEMBERS_ONLY,
       }),
     );

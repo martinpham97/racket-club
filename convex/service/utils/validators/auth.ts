@@ -16,7 +16,7 @@ import { ConvexError } from "convex/values";
  * @returns True if user is owner or admin, false otherwise
  */
 export const isOwnerOrSystemAdmin = (currentUser: UserDetails, targetUserId: Id<"users">) => {
-  return targetUserId === currentUser._id || !!currentUser.profile?.isAdmin;
+  return targetUserId === currentUser._id || currentUser.profile?.isAdmin === true;
 };
 
 /**

@@ -1,10 +1,11 @@
-import { EVENT_VISIBILITY } from "@/convex/constants/events";
+import { EVENT_STATUS, EVENT_VISIBILITY } from "@/convex/constants/events";
 import {
   createEventFilter,
   hasEventAccess,
   matchesClubFilter,
   matchesLevelRange,
   matchesLocationFilter,
+  matchesStatusFilter,
   matchesTextSearch,
 } from "@/convex/service/events/helpers/filters";
 import { createTestEventRecord } from "@/test-utils/samples/events";
@@ -15,31 +16,25 @@ import { describe, expect, it } from "vitest";
 const FIXED_DATE = 1704067200000; // 2024-01-01T00:00:00.000Z
 
 // Test ID constants
-const TEST_EVENT_SERIES_ID = genId<"eventSeries">("eventSeries");
 const TEST_CLUB_ID = genId<"clubs">("clubs1");
 const TEST_USER_ID = genId<"users">("users");
 const OTHER_CLUB_ID = genId<"clubs">("clubs2");
 const OTHER_CLUB_ID_2 = genId<"clubs">("clubs3");
 
 describe("Event Filters", () => {
-  const baseEvent = createTestEventRecord(
-    TEST_EVENT_SERIES_ID,
-    TEST_CLUB_ID,
-    TEST_USER_ID,
-    FIXED_DATE,
-    {
-      name: "Test Event",
-      description: "Test Description",
-      location: {
-        name: "Test Location",
-        address: "123 Test St",
-        placeId: "place123",
-        timezone: "Australia/Sydney",
-      },
-      levelRange: { min: 3, max: 7 },
-      visibility: EVENT_VISIBILITY.PUBLIC,
+  const baseEvent = createTestEventRecord(TEST_CLUB_ID, TEST_USER_ID, FIXED_DATE, {
+    name: "Test Event",
+    description: "Test Description",
+    location: {
+      name: "Test Location",
+      address: "123 Test St",
+      placeId: "place123",
+      timezone: "Australia/Sydney",
     },
-  );
+    levelRange: { min: 3, max: 7 },
+    visibility: EVENT_VISIBILITY.PUBLIC,
+    status: EVENT_STATUS.NOT_STARTED,
+  });
 
   describe("hasEventAccess", () => {
     it("allows access to public events for any user", () => {
@@ -181,6 +176,40 @@ describe("Event Filters", () => {
     });
   });
 
+  describe("matchesStatusFilter", () => {
+    it("returns true when no status filter is provided", () => {
+      expect(matchesStatusFilter(baseEvent)).toBe(true);
+      expect(matchesStatusFilter(baseEvent, undefined)).toBe(true);
+      expect(matchesStatusFilter(baseEvent, [])).toBe(true);
+    });
+
+    it("returns true when event status is in filter array", () => {
+      const event = { ...baseEvent, status: EVENT_STATUS.NOT_STARTED };
+      expect(matchesStatusFilter(event, [EVENT_STATUS.NOT_STARTED])).toBe(true);
+      expect(matchesStatusFilter(event, [EVENT_STATUS.NOT_STARTED, EVENT_STATUS.IN_PROGRESS])).toBe(true);
+    });
+
+    it("returns false when event status is not in filter array", () => {
+      const event = { ...baseEvent, status: EVENT_STATUS.NOT_STARTED };
+      expect(matchesStatusFilter(event, [EVENT_STATUS.COMPLETED])).toBe(false);
+      expect(matchesStatusFilter(event, [EVENT_STATUS.IN_PROGRESS, EVENT_STATUS.CANCELLED])).toBe(false);
+    });
+
+    it("handles all event statuses correctly", () => {
+      const notStartedEvent = { ...baseEvent, status: EVENT_STATUS.NOT_STARTED };
+      const inProgressEvent = { ...baseEvent, status: EVENT_STATUS.IN_PROGRESS };
+      const completedEvent = { ...baseEvent, status: EVENT_STATUS.COMPLETED };
+      const cancelledEvent = { ...baseEvent, status: EVENT_STATUS.CANCELLED };
+
+      const allStatuses = [EVENT_STATUS.NOT_STARTED, EVENT_STATUS.IN_PROGRESS, EVENT_STATUS.COMPLETED, EVENT_STATUS.CANCELLED];
+      
+      expect(matchesStatusFilter(notStartedEvent, allStatuses)).toBe(true);
+      expect(matchesStatusFilter(inProgressEvent, allStatuses)).toBe(true);
+      expect(matchesStatusFilter(completedEvent, allStatuses)).toBe(true);
+      expect(matchesStatusFilter(cancelledEvent, allStatuses)).toBe(true);
+    });
+  });
+
   describe("createEventFilter", () => {
     it("combines all filters correctly for matching event", () => {
       const filters = {
@@ -190,6 +219,7 @@ describe("Event Filters", () => {
         levelRange: { min: 3, max: 7 },
         placeId: "place123",
         query: "test",
+        status: [EVENT_STATUS.NOT_STARTED],
       };
       const userMemberClubIds = [baseEvent.clubId];
 
@@ -205,6 +235,7 @@ describe("Event Filters", () => {
         levelRange: { min: 3, max: 7 },
         placeId: "place123",
         query: "test",
+        status: [EVENT_STATUS.NOT_STARTED],
       };
       const userMemberClubIds = [baseEvent.clubId];
 
@@ -229,6 +260,12 @@ describe("Event Filters", () => {
         userMemberClubIds,
       );
       expect(filterFn4(baseEvent)).toBe(false); // location filter fails
+
+      const filterFn5 = createEventFilter(
+        { ...filters, status: [EVENT_STATUS.COMPLETED] },
+        userMemberClubIds,
+      );
+      expect(filterFn5(baseEvent)).toBe(false); // status filter fails
     });
 
     it("handles members-only events correctly", () => {

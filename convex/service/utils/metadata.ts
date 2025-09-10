@@ -7,7 +7,7 @@
  * @template T - Type of the original object extending Record<string, unknown>
  * @template U - Type of the updates object extending Partial<T>
  */
-export const getMetadata = <T extends Record<string, unknown>>(
+export const getChangeMetadata = <T extends Record<string, unknown>>(
   original: T,
   updates: Record<string, unknown>,
 ) => {

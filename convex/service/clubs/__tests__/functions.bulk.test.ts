@@ -5,6 +5,7 @@ import {
   CLUB_MEMBERSHIP_CANNOT_REMOVE_OWNER_ERROR,
 } from "@/convex/constants/errors";
 import schema from "@/convex/schema";
+import { Activity } from "@/convex/service/activities/schemas";
 import { convexTest } from "@/convex/setup.testing";
 import { ActivityTestHelpers } from "@/test-utils/samples/activities";
 import {
@@ -131,11 +132,14 @@ describe("Bulk Club Operations", () => {
       expect(updatedMembership2?.isApproved).toBe(true);
 
       // Validate join activities were created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const joinActivities = activities.filter((a) => a.type === ACTIVITY_TYPES.CLUB_JOINED);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const joinActivities = activities.filter(
+        (a: Activity) => a.type === ACTIVITY_TYPES.CLUB_JOINED,
+      );
       expect(joinActivities).toHaveLength(2);
-      joinActivities.forEach((activity) => {
-        expect(activity.resourceId).toBe(clubId);
+      joinActivities.forEach((activity: Activity) => {
+        expect(activity.clubId).toBe(clubId);
+        expect([user1Id, user2Id]).toContain(activity.userId);
       });
     });
 
@@ -296,11 +300,15 @@ describe("Bulk Club Operations", () => {
       expect(membership2After).toBeNull();
 
       // Validate removal activities were created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       const removalActivities = activities.filter(
-        (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+        (a: Activity) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       );
       expect(removalActivities).toHaveLength(2);
+      removalActivities.forEach((activity: Activity) => {
+        expect(activity.clubId).toBe(clubId);
+        expect([user1Id, user2Id]).toContain(activity.userId);
+      });
     });
 
     it("throws when trying to remove club owner", async () => {

@@ -35,9 +35,9 @@ export const baseUserSchema = z.object({
   isAnonymous: z.optional(z.boolean()),
 });
 
-const baseUserDetailsSchema = z.object({
-  ...withSystemFields("users", { email: z.string().optional() }),
-});
+const baseUserDetailsSchema = z.object(
+  withSystemFields("users", { ...baseUserSchema.shape, email: z.string().email().optional() }),
+);
 
 const userProfileWithSystemFields = z.object(
   withSystemFields("userProfiles", userProfileSchema.shape),
@@ -68,7 +68,7 @@ export const userProfileTable = defineEnt(zodToConvex(userProfileSchema))
   .edge("user", { to: "users", field: "userId" });
 
 export const userTable = defineEnt(zodToConvex(baseUserSchema))
-  .field("email", zodToConvex(z.optional(z.string().email())), { unique: true })
+  .field("email", zodToConvex(z.string().email().optional()), { unique: true })
   // 1:1 Profile relationship
   .edge("profile", { to: "userProfiles", ref: "userId" })
   // Club ownership and membership
@@ -80,7 +80,9 @@ export const userTable = defineEnt(zodToConvex(baseUserSchema))
   // Event creation and participation
   .edges("createdEventSeries", { to: "eventSeries", ref: "createdBy" })
   .edges("createdEvents", { to: "events", ref: "createdBy" })
-  .edges("eventParticipations", { to: "eventParticipants", ref: "userId" });
+  .edges("eventParticipations", { to: "eventParticipants", ref: "userId" })
+  // Activities
+  .edges("activities", { to: "activities", ref: "userId" });
 
 export const userTables = {
   users: userTable,

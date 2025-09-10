@@ -142,9 +142,32 @@ export const matchesTextSearch = (event: Event, query?: string): boolean => {
 };
 
 /**
+ * Filters events by status
+ *
+ * @param event - The event to check with its status property
+ * @param statuses - Optional array of event statuses to filter by
+ * @returns true if event status matches filter or no filter provided
+ *
+ * **Status Logic:**
+ * - No statuses: Always returns true
+ * - With statuses: Returns true only if event's status is in the array
+ *
+ * @example
+ * ```typescript
+ * const event = { status: "NOT_STARTED" };
+ * matchesStatusFilter(event); // returns true (no filter)
+ * matchesStatusFilter(event, ["NOT_STARTED", "IN_PROGRESS"]); // returns true
+ * matchesStatusFilter(event, ["COMPLETED"]); // returns false
+ * ```
+ */
+export const matchesStatusFilter = (event: Event, statuses?: string[]): boolean => {
+  return !statuses || statuses.length === 0 || statuses.includes(event.status);
+};
+
+/**
  * Creates a composite filter function that combines all event filtering criteria
  *
- * @param filters - Event filtering criteria (date range, clubs, level, location, query text)
+ * @param filters - Event filtering criteria (date range, clubs, level, location, query text, status)
  * @param userMemberClubIds - Club IDs where user has membership for access control
  * @returns Filter predicate function that takes an Event and returns boolean
  *
@@ -155,6 +178,7 @@ export const matchesTextSearch = (event: Event, query?: string): boolean => {
  * 3. Skill level range overlap
  * 4. Location place ID matching
  * 5. Text search in name/description
+ * 6. Event status matching
  */
 export const createEventFilter =
   (filters: EventFilters, userMemberClubIds: Id<"clubs">[]) =>
@@ -164,6 +188,7 @@ export const createEventFilter =
       matchesClubFilter(event, filters.clubIds) &&
       matchesLevelRange(event, filters.levelRange) &&
       matchesLocationFilter(event, filters.placeId) &&
-      matchesTextSearch(event, filters.query)
+      matchesTextSearch(event, filters.query) &&
+      matchesStatusFilter(event, filters.status)
     );
   };

@@ -191,6 +191,89 @@ describe("Club Functions", () => {
 });
 ```
 
+### Testing Scheduled Functions
+
+For functions that use scheduling (mutations/actions with `ctx.scheduler.runAfter` or `ctx.scheduler.runAt`):
+
+```typescript
+import { vi } from "vitest";
+
+// Test scheduled mutations/actions
+it("schedules event status updates", async () => {
+  // Enable fake timers
+  vi.useFakeTimers();
+
+  const t = convexTest(schema);
+
+  // Call function that schedules something
+  const scheduledFunctionId = await t.mutation(api.service.events.functions.scheduleStatusUpdate, {
+    eventId,
+    delayMs: 10000,
+  });
+
+  // Advance time past scheduled time
+  vi.advanceTimersByTime(11000);
+  vi.runAllTimers(); // Execute timers
+  await t.finishInProgressScheduledFunctions(); // Wait for completion
+
+  // Verify scheduled function succeeded
+  const status = await t.run(async (ctx) => {
+    return await ctx.db.get(scheduledFunctionId);
+  });
+  expect(status).toMatchObject({ state: { kind: "success" } });
+
+  vi.useRealTimers();
+});
+
+// Test complex scheduling chains with batched generation
+it("generates events when series is activated", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1704067200000); // Fixed Monday date
+
+  const t = convexTest(schema);
+
+  // Create event series that schedules batch generation
+  const eventSeries = await t.mutation(api.service.events.functions.createEventSeries, {
+    input: {
+      isActive: true,
+      schedule: {
+        startDate: Date.now() + TIME_MS.MINUTE,
+        endDate: Date.now() + 90 * TIME_MS.DAY,
+        daysOfWeek: [1, 2, 3, 4, 5], // Weekdays
+        interval: 1,
+      },
+      // ... other fields
+    },
+  });
+
+  // Verify initial batch (immediate generation)
+  {
+    const events = await eventHelpers.listEventsBySeries(eventSeries._id);
+    expect(events.length).toBe(10); // 2 weeks × 5 weekdays
+  }
+
+  // Advance time and trigger next batch
+  vi.advanceTimersByTime(9 * TIME_MS.DAY);
+  vi.runAllTimers(); // Execute scheduled functions
+  await t.finishInProgressScheduledFunctions(); // Wait for completion
+
+  {
+    const events = await eventHelpers.listEventsBySeries(eventSeries._id);
+    expect(events.length).toBe(20); // Next batch generated
+  }
+
+  // Complete all remaining scheduled functions in chain
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+  {
+    const events = await eventHelpers.listEventsBySeries(eventSeries._id);
+    expect(events.length).toBe(65); // Full series generated
+  }
+
+  vi.useRealTimers();
+});
+```
+
 ### Test Sample Pattern
 
 ```typescript
@@ -688,6 +771,56 @@ const activityId = activity._id;
 const userId = await userHelpers.insertUser(); // This is the full user object!
 ```
 
+### Scheduled Function Testing Patterns
+
+**Key Methods for Scheduled Functions:**
+
+- `vi.useFakeTimers()` / `vi.useRealTimers()` - Control time
+- `vi.setSystemTime(timestamp)` - Set fixed time for consistent tests
+- `vi.advanceTimersByTime(ms)` - Move time forward
+- `vi.runAllTimers()` - Execute all pending timers (REQUIRED before finishInProgressScheduledFunctions)
+- `t.finishInProgressScheduledFunctions()` - Wait for scheduled functions to complete
+- `t.finishAllScheduledFunctions(vi.runAllTimers)` - Complete entire scheduling chains
+
+**Critical Pattern for Scheduled Functions:**
+```typescript
+// ALWAYS use this sequence:
+vi.advanceTimersByTime(delayMs);
+vi.runAllTimers(); // ✅ Execute timers first
+await t.finishInProgressScheduledFunctions(); // ✅ Then wait for completion
+
+// For scheduling chains:
+await t.finishAllScheduledFunctions(vi.runAllTimers);
+```
+
+**Testing Batched Generation:**
+```typescript
+// Use block scoping to verify state at each step
+{
+  const events = await eventHelpers.listEventsBySeries(seriesId);
+  expect(events.length).toBe(10); // Initial batch
+}
+
+vi.advanceTimersByTime(9 * TIME_MS.DAY);
+vi.runAllTimers();
+await t.finishInProgressScheduledFunctions();
+
+{
+  const events = await eventHelpers.listEventsBySeries(seriesId);
+  expect(events.length).toBe(20); // Next batch
+}
+```
+
+**Testing Internal Mutations:**
+
+```typescript
+// Test internal mutations directly
+const result = await t.runMutation(api.service.events.functions._updateEventStatus, {
+  eventId,
+  status: EVENT_STATUS.COMPLETED,
+});
+```
+
 ```typescript
 export class UserTestHelpers {
   constructor(private t: ReturnType<typeof convexTest>) {}
@@ -871,23 +1004,48 @@ await expect(
 ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
 ```
 
+## Test Update Requirements
+
+### MANDATORY: Always Check and Update Tests When Modifying Files
+
+When modifying ANY file in the Convex backend:
+
+1. **ALWAYS check for existing tests** in the corresponding `__tests__/` directory
+2. **ALWAYS update tests** to reflect changes made to:
+   - Function signatures
+   - Input/output schemas
+   - Business logic
+   - Error conditions
+   - Database operations
+3. **ALWAYS run tests** after modifications to ensure they pass
+4. **ALWAYS add new tests** for new functionality
+5. **NEVER leave tests in a broken state** - fix them immediately
+
+### Test Location Pattern
+
+- Functions: `convex/service/{domain}/functions.ts` → `convex/service/{domain}/__tests__/functions.test.ts`
+- Database: `convex/service/{domain}/database.ts` → `convex/service/{domain}/__tests__/database.test.ts`
+- Helpers: `convex/service/{domain}/helpers/{helper}.ts` → `convex/service/{domain}/helpers/__tests__/{helper}.test.ts`
+- Validators: `convex/service/utils/validators/{validator}.ts` → `convex/service/utils/validators/__tests__/{validator}.test.ts`
+
 ## Key Requirements Summary
 
-1. JSDoc on ALL functions
-2. Use real data in tests, no mocks (except rate limiting)
-3. Absolute imports with `@/convex/...`
-4. Strict TypeScript typing
-5. **Mixed API**: `ctx.table()` for Ents tables, `ctx.db` for legacy auth tables
-6. Test helpers in `test-utils/samples/`
-7. Error constants from `@/convex/constants/`
-8. `ctx.table("tableName").getX(id)` for required lookups
-9. **Fully specified edge syntax only**
-10. **Different test patterns**: `t.runWithCtx()` for database tests, `t.query/t.mutation()` for API tests
-11. **Helper class typing**: `ReturnType<typeof convexTest>`
-12. **Function structure**: `publicQuery()`, `authenticatedQuery()`, `authenticatedMutation()`
-13. **Proper assertions**: `toBe()` for primitives, `toEqual()` for objects
-14. **Input structure**: Use `{ input: schema }` for mutations with `userId` in input
-15. **Return types**: Use `z.object(withSystemFields())` for entity returns
-16. **Test Helper Insert Pattern**: All `insert*()` methods return full objects, requiring ID extraction with `object._id`
-17. **CRITICAL**: NEVER use test helpers inside `t.runWithCtx()` - helpers use `runWithCtx` internally
-18. **CRITICAL**: NEVER nest `t.runWithCtx()` calls - always separate data setup from function testing
+1. **MANDATORY**: Check and update existing tests when modifying files
+2. JSDoc on ALL functions
+3. Use real data in tests, no mocks (except rate limiting)
+4. Absolute imports with `@/convex/...`
+5. Strict TypeScript typing
+6. **Mixed API**: `ctx.table()` for Ents tables, `ctx.db` for legacy auth tables
+7. Test helpers in `test-utils/samples/`
+8. Error constants from `@/convex/constants/`
+9. `ctx.table("tableName").getX(id)` for required lookups
+10. **Fully specified edge syntax only**
+11. **Different test patterns**: `t.runWithCtx()` for database tests, `t.query/t.mutation()` for API tests
+12. **Helper class typing**: `ReturnType<typeof convexTest>`
+13. **Function structure**: `publicQuery()`, `authenticatedQuery()`, `authenticatedMutation()`
+14. **Proper assertions**: `toBe()` for primitives, `toEqual()` for objects
+15. **Input structure**: Use `{ input: schema }` for mutations with `userId` in input
+16. **Return types**: Use `z.object(withSystemFields())` for entity returns
+17. **Test Helper Insert Pattern**: All `insert*()` methods return full objects, requiring ID extraction with `object._id`
+18. **CRITICAL**: NEVER use test helpers inside `t.runWithCtx()` - helpers use `runWithCtx` internally
+19. **CRITICAL**: NEVER nest `t.runWithCtx()` calls - always separate data setup from function testing

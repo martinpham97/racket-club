@@ -1,27 +1,40 @@
 import { Id } from "@/convex/_generated/dataModel";
 import { ACTIVITY_TYPES } from "@/convex/constants/activities";
-import { Activity, ResourceId } from "@/convex/service/activities/schemas";
+import { Activity } from "@/convex/service/activities/schemas";
 import { WithoutSystemFields } from "convex/server";
 import { genId } from "./id";
 
+type ActivityInput = {
+  userId?: Id<"users">;
+  clubId?: Id<"clubs">;
+  eventId?: Id<"events">;
+  eventSeriesId?: Id<"eventSeries">;
+  type?: string;
+  scheduledAt?: number;
+  metadata?: Array<{
+    previousValue?: string;
+    newValue?: string;
+    fieldChanged?: string;
+  }>;
+};
+
 export const createTestActivity = (
-  resourceId?: Id<"clubs"> | Id<"users">,
-  overrides?: Partial<Activity>,
+  input: ActivityInput = {},
 ): Omit<Activity, "_id" | "_creationTime"> => ({
-  resourceId: resourceId || genId<"clubs">("clubs"),
-  type: ACTIVITY_TYPES.CLUB_CREATED,
+  userId: input.userId,
+  clubId: input.clubId,
+  eventId: input.eventId,
+  eventSeriesId: input.eventSeriesId,
+  type: input.type || ACTIVITY_TYPES.CLUB_CREATED,
   createdAt: Date.now(),
-  date: Date.now(),
-  ...overrides,
+  date: input.scheduledAt || Date.now(),
+  metadata: input.metadata,
 });
 
-export const createTestActivityRecord = (
-  resourceId?: Id<"clubs"> | Id<"users">,
-  overrides?: Partial<Activity>,
-): Activity => ({
+export const createTestActivityRecord = (input: ActivityInput = {}): Activity => ({
   _id: genId<"activities">("activities"),
   _creationTime: Date.now(),
-  ...createTestActivity(resourceId, overrides),
+  ...createTestActivity(input),
 });
 
 export class ActivityTestHelpers {
@@ -35,12 +48,55 @@ export class ActivityTestHelpers {
     return await this.t.runWithCtx((ctx) => ctx.table("activities").insert(activity).get());
   }
 
-  async getActivitiesForResource(resourceId: ResourceId) {
+  async getActivitiesForClub(clubId: Id<"clubs">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "clubDate", (q) => q.eq("clubId", clubId)).order("desc"),
+    );
+  }
+
+  async listActivitiesForClub(clubId: Id<"clubs">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "clubDate", (q) => q.eq("clubId", clubId)).order("desc"),
+    );
+  }
+
+  async getActivitiesForUser(userId: Id<"users">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "userDate", (q) => q.eq("userId", userId)).order("desc"),
+    );
+  }
+
+  async listActivitiesForUser(userId: Id<"users">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "userDate", (q) => q.eq("userId", userId)).order("desc"),
+    );
+  }
+
+  async getActivitiesForEventSeries(eventSeriesId: Id<"eventSeries">) {
     return await this.t.runWithCtx((ctx) =>
       ctx
-        .table("activities")
-        .filter((q) => q.eq(q.field("resourceId"), resourceId))
+        .table("activities", "eventSeriesDate", (q) => q.eq("eventSeriesId", eventSeriesId))
         .order("desc"),
+    );
+  }
+
+  async listActivitiesForEventSeries(eventSeriesId: Id<"eventSeries">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx
+        .table("activities", "eventSeriesDate", (q) => q.eq("eventSeriesId", eventSeriesId))
+        .order("desc"),
+    );
+  }
+
+  async getActivitiesForEvents(eventId: Id<"events">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "eventDate", (q) => q.eq("eventId", eventId)).order("desc"),
+    );
+  }
+
+  async listActivitiesForEvent(eventId: Id<"events">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("activities", "eventDate", (q) => q.eq("eventId", eventId)).order("desc"),
     );
   }
 

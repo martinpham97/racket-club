@@ -22,7 +22,7 @@ import { UserDetailsWithProfile } from "./service/users/schemas";
 import { enforceAuthenticated } from "./service/utils/validators/auth";
 import { MutationCtx } from "./types";
 
-const createQueryEntCtx = (baseCtx: GenericQueryCtx<DataModel>) => {
+export const createQueryEntCtx = (baseCtx: GenericQueryCtx<DataModel>) => {
   const { db, ...restCtx } = baseCtx;
   return {
     ...restCtx,
@@ -42,7 +42,7 @@ export const createMutationEntCtx = (baseCtx: GenericMutationCtx<DataModel>) => 
   };
 };
 
-const createActionEntCtx = () => ({});
+export const createActionEntCtx = () => ({});
 
 export const query = customQuery(
   baseQuery,

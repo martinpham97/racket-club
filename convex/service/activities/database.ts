@@ -1,8 +1,7 @@
 import { Id } from "@/convex/_generated/dataModel";
-import { ActivityType } from "@/convex/constants/activities";
 import { MutationCtx, QueryCtx } from "@/convex/types";
 import { PaginationOptions, PaginationResult } from "convex/server";
-import { Activity, ActivityCreateInput, ResourceId } from "./schemas";
+import { Activity, ActivityCreateInput } from "./schemas";
 
 /**
  * Gets an activity by its ID.
@@ -18,67 +17,75 @@ export const getActivity = async (
 };
 
 /**
- * Lists activities for a resource with pagination.
+ * Lists activities for a user with pagination.
  * @param ctx Query context
- * @param resourceId Resource ID to get activities for
- * @param paginationOpts Pagination options
- * @returns Paginated result of resource activities
- */
-export const listActivitiesForResource = async (
-  ctx: QueryCtx,
-  resourceId: ResourceId,
-  paginationOpts: PaginationOptions,
-): Promise<PaginationResult<Activity>> => {
-  return await ctx
-    .table("activities")
-    .filter((q) => q.eq(q.field("resourceId"), resourceId))
-    .order("desc")
-    .paginate(paginationOpts);
-};
-
-/**
- * Lists activities for a related resource with pagination.
- * @param ctx Query context
- * @param relatedId Related resource ID to get activities for
+ * @param userId User ID to get activities for
  * @param paginationOpts Pagination options
  * @returns Paginated result of user activities
  */
-export const listActivitiesForRelatedResource = async (
+export const listActivitiesForUser = async (
   ctx: QueryCtx,
-  relatedId: ResourceId,
+  userId: Id<"users">,
   paginationOpts: PaginationOptions,
 ): Promise<PaginationResult<Activity>> => {
   return await ctx
-    .table("activities")
-    .filter((q) => q.eq(q.field("relatedId"), relatedId))
+    .table("activities", "userDate", (q) => q.eq("userId", userId))
     .order("desc")
     .paginate(paginationOpts);
 };
 
 /**
- * Gets a scheduled activity for a resource at a specific time and type.
+ * Lists activities for a club with pagination.
  * @param ctx Query context
- * @param resourceId Resource ID to get scheduled activity for
- * @param scheduledAt Timestamp when activity is scheduled
- * @param type Activity type to find
- * @returns Single scheduled activity matching the criteria, or null if not found
+ * @param clubId Club ID to get activities for
+ * @param paginationOpts Pagination options
+ * @returns Paginated result of club activities
  */
-export const getScheduledActivityForResource = async (
+export const listActivitiesForClub = async (
   ctx: QueryCtx,
-  resourceId: ResourceId,
-  scheduledAt: number,
-  type: ActivityType,
-): Promise<Activity | null> => {
+  clubId: Id<"clubs">,
+  paginationOpts: PaginationOptions,
+): Promise<PaginationResult<Activity>> => {
   return await ctx
-    .table("activities")
-    .filter((q) =>
-      q.and(
-        q.eq(q.field("resourceId"), resourceId),
-        q.eq(q.field("type"), type),
-        q.eq(q.field("scheduledAt"), scheduledAt),
-      ),
-    )
-    .first();
+    .table("activities", "clubDate", (q) => q.eq("clubId", clubId))
+    .order("desc")
+    .paginate(paginationOpts);
+};
+
+/**
+ * Lists activities for an event with pagination.
+ * @param ctx Query context
+ * @param eventId Event ID to get activities for
+ * @param paginationOpts Pagination options
+ * @returns Paginated result of event activities
+ */
+export const listActivitiesForEvent = async (
+  ctx: QueryCtx,
+  eventId: Id<"events">,
+  paginationOpts: PaginationOptions,
+): Promise<PaginationResult<Activity>> => {
+  return await ctx
+    .table("activities", "eventDate", (q) => q.eq("eventId", eventId))
+    .order("desc")
+    .paginate(paginationOpts);
+};
+
+/**
+ * Lists activities for an event series with pagination.
+ * @param ctx Query context
+ * @param eventSeriesId Event series ID to get activities for
+ * @param paginationOpts Pagination options
+ * @returns Paginated result of event series activities
+ */
+export const listActivitiesForEventSeries = async (
+  ctx: QueryCtx,
+  eventSeriesId: Id<"eventSeries">,
+  paginationOpts: PaginationOptions,
+): Promise<PaginationResult<Activity>> => {
+  return await ctx
+    .table("activities", "eventSeriesDate", (q) => q.eq("eventSeriesId", eventSeriesId))
+    .order("desc")
+    .paginate(paginationOpts);
 };
 
 /**
@@ -97,25 +104,7 @@ export const createActivity = async (
     .insert({
       ...input,
       createdAt,
-      date: input.scheduledAt ?? createdAt,
+      date: createdAt,
     })
     .get();
-};
-
-/**
- * Deletes all activities relating to the given resource.
- * @param ctx Mutation context
- * @param resourceId Related resource ID
- */
-export const deleteActivitiesForResource = async (
-  ctx: MutationCtx,
-  resourceId: ResourceId,
-): Promise<void> => {
-  const activities = await ctx
-    .table("activities")
-    .filter((q) => q.eq(q.field("resourceId"), resourceId));
-
-  for (const activity of activities) {
-    await ctx.table("activities").getX(activity._id).delete();
-  }
 };

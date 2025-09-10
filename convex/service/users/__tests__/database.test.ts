@@ -47,6 +47,7 @@ describe("User Database Service", () => {
       expect(result).not.toBeNull();
       expect(result!._id).toBe(userId);
       expect(result!.profile).toEqual(profile);
+      expect(result!.email).toBe(user.email);
     });
 
     it("returns null when not authenticated", async () => {

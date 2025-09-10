@@ -1,10 +1,11 @@
 import { internal } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { EVENT_STATUS, MAX_EVENT_GENERATION_DAYS } from "@/convex/constants/events";
+import { EVENT_STATUS, NUM_DAYS_GENERATE_EVENTS_IN_ADVANCE } from "@/convex/constants/events";
 import { EventSeries } from "@/convex/service/events/schemas";
 import { getStartOfDayInTimezone, getUtcTimestampForDate } from "@/convex/service/utils/time";
 import { MutationCtx } from "@/convex/types";
-import { addDays, isFuture, subDays } from "date-fns";
+import { addDays, subDays } from "date-fns";
+import { generateUpcomingEventDates } from "./dates";
 
 /**
  * Schedules event series deactivation
@@ -92,20 +93,18 @@ export const getOrScheduleEventStatusTransitions = async (
 /**
  * Schedules automatic deactivation of an event series at its end date
  * @param ctx Mutation context
- * @param seriesId ID of the event series to deactivate
- * @param input Event series data containing schedule information
+ * @param series Event series data containing schedule information
  */
 export const scheduleEventSeriesDeactivationAtEndDate = async (
   ctx: MutationCtx,
-  seriesId: Id<"eventSeries">,
-  input: EventSeries,
+  series: EventSeries,
 ): Promise<void> => {
   const endDateInTimezone = getStartOfDayInTimezone(
-    input.schedule.endDate,
-    input.location.timezone,
+    series.schedule.endDate,
+    series.location.timezone,
   );
   const deactivationDate = endDateInTimezone.getTime();
-  await scheduleEventSeriesDeactivation(ctx, seriesId, deactivationDate);
+  await scheduleEventSeriesDeactivation(ctx, series._id, deactivationDate);
 };
 
 /**
@@ -117,21 +116,14 @@ export const activateEventSeries = async (
   ctx: MutationCtx,
   eventSeries: EventSeries,
 ): Promise<void> => {
-  await scheduleEventSeriesDeactivationAtEndDate(ctx, eventSeries._id, eventSeries);
+  await scheduleEventSeriesDeactivationAtEndDate(ctx, eventSeries);
   const startDate = Math.max(Date.now(), eventSeries.schedule.startDate);
   const endDate = eventSeries.schedule.endDate;
-  const { events } = await ctx.runMutation(
-    internal.service.events.functions._generateEventsForSeries,
-    {
-      eventSeriesId: eventSeries._id,
-      range: { startDate, endDate },
-    },
-  );
-  await scheduleNextEventGeneration(
-    ctx,
-    eventSeries._id,
-    events.map((e) => e.date),
-  );
+  await ctx.runMutation(internal.service.events.functions._generateEventsForSeries, {
+    eventSeriesId: eventSeries._id,
+    range: { startDate, endDate },
+    scheduleNextBatch: true,
+  });
 };
 
 /**
@@ -139,33 +131,47 @@ export const activateEventSeries = async (
  * @param ctx Mutation context
  * @param seriesId ID of the event series
  * @param currentGeneratedDates Array of timestamps for currently generated events
+ * @returns ID of the scheduled function or null if no next batch is needed
  */
 export const scheduleNextEventGeneration = async (
   ctx: MutationCtx,
   seriesId: Id<"eventSeries">,
   currentGeneratedDates: number[],
-): Promise<void> => {
+): Promise<Id<"_scheduled_functions"> | null> => {
   if (currentGeneratedDates.length === 0) {
-    return;
+    return null;
   }
 
   const series = await ctx.table("eventSeries").getX(seriesId);
   const lastGeneratedDate = Math.max(...currentGeneratedDates);
-  const scheduleDate = subDays(lastGeneratedDate, MAX_EVENT_GENERATION_DAYS).getTime();
+  const nextDates = generateUpcomingEventDates(
+    series,
+    addDays(lastGeneratedDate, 1).getTime(),
+    series.schedule.endDate,
+  );
 
-  if (isFuture(scheduleDate) && scheduleDate < series.schedule.endDate) {
-    await ctx.scheduler.runAt(
+  if (nextDates.length > 0) {
+    const nextDate = Math.min(...nextDates);
+    const scheduleDate = subDays(nextDate, NUM_DAYS_GENERATE_EVENTS_IN_ADVANCE).getTime();
+
+    const onNextBatchFunctionId = await ctx.scheduler.runAt(
       scheduleDate,
       internal.service.events.functions._generateEventsForSeries,
       {
         eventSeriesId: seriesId,
         range: {
-          startDate: addDays(lastGeneratedDate, 1).getTime(),
+          startDate: nextDate,
           endDate: series.schedule.endDate,
         },
+        scheduleNextBatch: true,
       },
     );
+    await series.patch({ onNextBatchFunctionId });
+
+    return onNextBatchFunctionId;
   }
+
+  return null;
 };
 
 /**

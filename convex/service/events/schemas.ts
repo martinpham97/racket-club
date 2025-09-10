@@ -154,6 +154,7 @@ export const eventSeriesSchema = baseEventSchema.extend({
   schedule: scheduleSchema,
   isActive: z.boolean(),
   onSeriesEndFunctionId: zid("_scheduled_functions").optional(),
+  onNextBatchFunctionId: zid("_scheduled_functions").optional(),
 });
 
 export const eventSchema = baseEventSchema.extend({
@@ -209,6 +210,7 @@ export const eventFiltersSchema = baseDateRangeSchema
     clubIds: z.array(zid("clubs")).optional(),
     levelRange: levelRangeSchema.optional(),
     placeId: z.string().optional(),
+    status: z.array(eventStatusSchema).optional(),
   })
   .refine(isEventDateRangeValid, {
     message: EVENT_DATE_RANGE_INVALID_ERROR,
@@ -242,7 +244,6 @@ export type EventParticipantDetails = z.infer<typeof eventParticipantDetailsSche
 export type EventDetails = z.infer<typeof eventDetailsSchema>;
 
 export const eventSeriesTable = defineEnt(zodToConvex(eventSeriesSchema))
-  .index("clubId", ["clubId"])
   .edge("club", { to: "clubs", field: "clubId" })
   .edge("createdBy", { to: "users", field: "createdBy" })
   .edge("onSeriesEndFunction", {
@@ -251,7 +252,14 @@ export const eventSeriesTable = defineEnt(zodToConvex(eventSeriesSchema))
     optional: true,
     deletion: "hard",
   })
-  .edges("events", { to: "events", ref: "eventSeriesId" });
+  .edge("onNextBatchFunction", {
+    to: "_scheduled_functions",
+    field: "onNextBatchFunctionId",
+    optional: true,
+    deletion: "hard",
+  })
+  .edges("events", { to: "events", ref: "eventSeriesId" })
+  .edges("activities", { to: "activities", ref: "eventSeriesId" });
 
 export const eventTable = defineEnt(zodToConvex(eventSchema))
   .index("clubDate", ["clubId", "date"])
@@ -272,10 +280,10 @@ export const eventTable = defineEnt(zodToConvex(eventSchema))
     field: "onEventEndFunctionId",
     optional: true,
     deletion: "hard",
-  });
+  })
+  .edges("activities", { to: "activities", ref: "eventId" });
 
 export const eventParticipantTable = defineEnt(zodToConvex(eventParticipantSchema))
-  .index("eventId", ["eventId"])
   .index("userDate", ["userId", "date"])
   .index("eventUser", ["eventId", "userId"])
   .edge("event", { to: "events", field: "eventId" })

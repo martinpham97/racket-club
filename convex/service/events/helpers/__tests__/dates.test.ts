@@ -181,5 +181,42 @@ describe("Date Helpers", () => {
         expect(date).toBeLessThanOrEqual(endDate);
       });
     });
+
+    it("should stop exactly at max generation limit boundary", () => {
+      const user = createTestUserRecord();
+      const startDate = new Date("2024-01-01").getTime();
+      const endDate = addDays(new Date("2024-01-01"), 30).getTime(); // Beyond max limit
+
+      const series = createTestEventSeriesRecord("club123" as Id<"clubs">, user._id, {
+        schedule: {
+          startDate,
+          endDate,
+          daysOfWeek: [1, 2, 3, 4, 5, 6, 0], // Every day
+          interval: 1,
+        },
+        location: {
+          timezone: "UTC",
+          address: "123 Test St",
+          placeId: "test-place-id",
+          name: "Test Location",
+        },
+      });
+
+      const dates = generateUpcomingEventDates(series, startDate, endDate);
+      const maxBoundaryDate = addDays(new Date(startDate), MAX_EVENT_GENERATION_DAYS).getTime();
+
+      // Should have exactly MAX_EVENT_GENERATION_DAYS worth of events
+      expect(dates.length).toBe(MAX_EVENT_GENERATION_DAYS);
+      
+      // All dates should be strictly less than the boundary
+      dates.forEach((date) => {
+        expect(date).toBeLessThan(maxBoundaryDate);
+      });
+      
+      // Last date should be exactly one day before the boundary
+      const lastDate = dates[dates.length - 1];
+      const expectedLastDate = addDays(new Date(startDate), MAX_EVENT_GENERATION_DAYS - 1).getTime();
+      expect(new Date(lastDate).toDateString()).toBe(new Date(expectedLastDate).toDateString());
+    });
   });
 });

@@ -27,7 +27,7 @@ export const generateUpcomingEventDates = (
   const currentDate = new Date(startDateInTz);
   let weekCount = 0;
 
-  while (currentDate <= maxEndDate) {
+  while (currentDate < maxEndDate) {
     const dayOfWeek = currentDate.getDay();
 
     if (daysOfWeek.includes(dayOfWeek)) {

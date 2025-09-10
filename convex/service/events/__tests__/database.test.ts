@@ -156,7 +156,7 @@ describe("Events Database Service", () => {
         createTestEventSeries(clubId, userId),
       );
       const seriesId = insertedSeries._id;
-      const eventData = createTestEvent(seriesId, clubId, userId, FIXED_DATE);
+      const eventData = createTestEvent(clubId, userId, FIXED_DATE, { eventSeriesId: seriesId });
       const insertedEvent = await eventHelpers.insertEvent(eventData);
       const eventId = insertedEvent._id;
 
@@ -193,15 +193,11 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
       // Create events on different dates
-      const event1 = createTestEvent(seriesId, clubId, userId, FIXED_DATE);
-      const event2 = createTestEvent(seriesId, clubId, userId, FIXED_DATE + 86400000);
-      const event3 = createTestEvent(seriesId, clubId, userId, FIXED_DATE + 172800000); // Outside range
+      const event1 = createTestEvent(clubId, userId, FIXED_DATE);
+      const event2 = createTestEvent(clubId, userId, FIXED_DATE + 86400000);
+      const event3 = createTestEvent(clubId, userId, FIXED_DATE + 172800000); // Outside range
 
       await eventHelpers.insertEvent(event1);
       await eventHelpers.insertEvent(event2);
@@ -225,13 +221,9 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
-      const laterEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE + 86400000);
-      const earlierEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE);
+      const laterEvent = createTestEvent(clubId, userId, FIXED_DATE + 86400000);
+      const earlierEvent = createTestEvent(clubId, userId, FIXED_DATE);
 
       // Insert in reverse order
       await eventHelpers.insertEvent(laterEvent);
@@ -275,12 +267,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -301,12 +289,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -330,12 +314,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -355,12 +335,8 @@ describe("Events Database Service", () => {
       const userId2 = user2._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId1),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, FIXED_DATE),
+        createTestEvent(clubId, userId1, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -386,12 +362,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -419,18 +391,14 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
       // Create a valid event and participation first
       const validEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE + 86400000),
+        createTestEvent(clubId, userId, FIXED_DATE + 86400000),
       );
       const validEventId = validEvent._id;
 
@@ -463,17 +431,13 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
       const eventInRange = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventInRangeId = eventInRange._id;
       const eventOutOfRange = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE + 172800000),
+        createTestEvent(clubId, userId, FIXED_DATE + 172800000),
       );
       const eventOutOfRangeId = eventOutOfRange._id;
 
@@ -520,15 +484,11 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
-      const tennisEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE, {
+      const tennisEvent = createTestEvent(clubId, userId, FIXED_DATE, {
         name: "Tennis Tournament",
       });
-      const basketballEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE, {
+      const basketballEvent = createTestEvent(clubId, userId, FIXED_DATE, {
         name: "Basketball Game",
       });
 
@@ -553,13 +513,9 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
-      const laterEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE + 86400000);
-      const earlierEvent = createTestEvent(seriesId, clubId, userId, FIXED_DATE);
+      const laterEvent = createTestEvent(clubId, userId, FIXED_DATE + 86400000);
+      const earlierEvent = createTestEvent(clubId, userId, FIXED_DATE);
 
       await eventHelpers.insertEvent(laterEvent);
       await eventHelpers.insertEvent(earlierEvent);
@@ -582,15 +538,9 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
 
-      await eventHelpers.insertEvent(createTestEvent(seriesId, clubId, userId, FIXED_DATE));
-      await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE + 86400000),
-      );
+      await eventHelpers.insertEvent(createTestEvent(clubId, userId, FIXED_DATE));
+      await eventHelpers.insertEvent(createTestEvent(clubId, userId, FIXED_DATE + 86400000));
 
       const result = await t.runWithCtx(async (ctx) => {
         return await searchEvents(
@@ -673,12 +623,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -688,7 +634,6 @@ describe("Events Database Service", () => {
 
       expect(result._id).toBe(eventId);
       expect(result.clubId).toBe(clubId);
-      expect(result.eventSeriesId).toBe(seriesId);
       expect(result.date).toBe(FIXED_DATE);
     });
 
@@ -697,12 +642,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
       await eventHelpers.deleteEvent(eventId);
@@ -717,11 +658,7 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
-      const eventData = createTestEvent(seriesId, clubId, userId, FIXED_DATE, {
+      const eventData = createTestEvent(clubId, userId, FIXED_DATE, {
         name: "Test Event",
         description: "Test Description",
       });
@@ -813,12 +750,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
       const originalEvent = await eventHelpers.getEvent(eventId);
@@ -841,12 +774,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -875,12 +804,8 @@ describe("Events Database Service", () => {
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE),
+        createTestEvent(clubId, userId, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
       const insertedParticipant = await eventHelpers.insertEventParticipant(
@@ -903,12 +828,8 @@ describe("Events Database Service", () => {
       const userId2 = user2._id;
       const club = await clubHelpers.insertClub(createTestClub(userId1));
       const clubId = club._id;
-      const insertedSeries = await eventHelpers.insertEventSeries(
-        createTestEventSeries(clubId, userId1),
-      );
-      const seriesId = insertedSeries._id;
       const insertedEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId1, FIXED_DATE),
+        createTestEvent(clubId, userId1, FIXED_DATE),
       );
       const eventId = insertedEvent._id;
 
@@ -962,7 +883,10 @@ describe("Events Database Service", () => {
       const seriesId = series._id;
 
       const existingEvent = await eventHelpers.insertEvent(
-        createTestEvent(seriesId, clubId, userId, FIXED_DATE, { name: "Existing Event" }),
+        createTestEvent(clubId, userId, FIXED_DATE, {
+          name: "Existing Event",
+          eventSeriesId: seriesId,
+        }),
       );
 
       const result = await t.runWithCtx(async (ctx) => {

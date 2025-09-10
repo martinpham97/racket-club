@@ -179,7 +179,7 @@ export const getEventAtDate = async (
 /**
  * Searches events with optimized filtering and pagination
  * @param ctx Query context for database operations
- * @param filters Event filters (date range, clubs, skill level, location)
+ * @param filters Event filters (date range, clubs, skill level, location, status)
  * @param userMemberClubIds Club IDs where user has membership access
  * @param pagination Pagination options for result set
  * @returns Paginated list of events matching search criteria

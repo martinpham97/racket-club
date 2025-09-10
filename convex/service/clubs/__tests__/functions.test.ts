@@ -182,11 +182,11 @@ describe("Club Functions", () => {
       );
 
       // Validate join request activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const joinActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_JOIN_REQUEST);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const joinActivity = activities.find((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_JOIN_REQUEST);
       expect(joinActivity).toBeDefined();
-      expect(joinActivity?.resourceId).toBe(clubId);
-      expect(joinActivity?.relatedId).toEqual(userId);
+      expect(joinActivity?.clubId).toBe(clubId);
+      expect(joinActivity?.userId).toBe(userId);
     });
 
     it("banned user cannot join", async () => {
@@ -402,11 +402,11 @@ describe("Club Functions", () => {
       expect(updatedClub?.numMembers).toBe(0);
 
       // Validate leave activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const leaveActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_LEFT);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const leaveActivity = activities.find((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_LEFT);
       expect(leaveActivity).toBeDefined();
-      expect(leaveActivity?.resourceId).toBe(clubId);
-      expect(leaveActivity?.relatedId).toEqual(userId);
+      expect(leaveActivity?.clubId).toBe(clubId);
+      expect(leaveActivity?.userId).toBe(userId);
     });
 
     it("throws when user not a member", async () => {
@@ -526,20 +526,18 @@ describe("Club Functions", () => {
       );
 
       // Validate activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       expect(activities).toHaveLength(2);
       expect(activities[1]).toEqual(
         expect.objectContaining({
-          resourceId: clubId,
-          relatedId: userId,
+          clubId: clubId,
           type: ACTIVITY_TYPES.CLUB_CREATED,
         }),
       );
       expect(activities[0]).toEqual(
         expect.objectContaining({
-          resourceId: clubId,
+          clubId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
-          relatedId: userId,
         }),
       );
     });
@@ -580,19 +578,18 @@ describe("Club Functions", () => {
       );
 
       // Validate activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       expect(activities).toHaveLength(2);
       expect(activities[1]).toEqual(
         expect.objectContaining({
-          resourceId: clubId,
+          clubId: clubId,
           type: ACTIVITY_TYPES.CLUB_CREATED,
         }),
       );
       expect(activities[0]).toEqual(
         expect.objectContaining({
-          resourceId: clubId,
+          clubId: clubId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
-          relatedId: userId,
         }),
       );
     });
@@ -673,11 +670,11 @@ describe("Club Functions", () => {
       expect(updatedClub?.name).toBe("Updated Club Name");
 
       // Validate update activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const updateActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_UPDATED);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const updateActivity = activities.find((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_UPDATED);
       expect(updateActivity).toBeDefined();
-      expect(updateActivity?.relatedId).toBe(userId);
-      expect(updateActivity?.resourceId).toBe(clubId);
+      expect(updateActivity?.clubId).toBe(clubId);
+      expect(updateActivity?.userId).toBe(userId);
       expect(updateActivity?.metadata).toContainEqual({
         previousValue: "Default club name",
         newValue: "Updated Club Name",
@@ -937,13 +934,13 @@ describe("Club Functions", () => {
       expect(deletedClub).toBeNull();
 
       // Validate activities were cleaned up
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       expect(activities).toHaveLength(1);
       expect(activities[0]).toEqual(
         expect.objectContaining({
-          resourceId: clubId,
+          clubId: clubId,
+          userId: userId,
           type: ACTIVITY_TYPES.CLUB_DELETED,
-          relatedId: userId,
         }),
       );
     });
@@ -1000,13 +997,13 @@ describe("Club Functions", () => {
       );
 
       // Validate membership update activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       const updateActivity = activities.find(
-        (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
+        (a: Activity) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
       );
       expect(updateActivity).toBeDefined();
-      expect(updateActivity?.resourceId).toBe(clubId);
-      expect(updateActivity?.relatedId).toEqual(userId);
+      expect(updateActivity?.clubId).toBe(clubId);
+      expect(updateActivity?.userId).toBe(userId);
     });
 
     it("allows system admin to update any membership", async () => {
@@ -1193,13 +1190,13 @@ describe("Club Functions", () => {
       expect(updatedClub?.numMembers).toBe(1);
 
       // Validate membership removal activity was created
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
       const removeActivity = activities.find(
-        (a) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
+        (a: Activity) => a.type === ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       );
       expect(removeActivity).toBeDefined();
-      expect(removeActivity?.resourceId).toBe(clubId);
-      expect(removeActivity?.relatedId).toEqual(userId);
+      expect(removeActivity?.clubId).toBe(clubId);
+      expect(removeActivity?.userId).toBe(userId);
     });
 
     it("prevents removing club owner", async () => {
@@ -1336,13 +1333,13 @@ describe("Club Functions", () => {
       await clubHelpers.insertMembership(membership);
 
       // Create test activities
-      const activity1 = createTestActivity(clubId, {
+      const activity1 = createTestActivity({
+        clubId,
         type: ACTIVITY_TYPES.CLUB_CREATED,
-        createdBy: userId,
       });
-      const activity2 = createTestActivity(clubId, {
+      const activity2 = createTestActivity({
+        clubId,
         type: ACTIVITY_TYPES.CLUB_UPDATED,
-        createdBy: userId,
       });
       await activityHelpers.insertActivity(activity1);
       await activityHelpers.insertActivity(activity2);
@@ -1359,9 +1356,9 @@ describe("Club Functions", () => {
       expect(result.page.some((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_CREATED)).toBe(true);
       expect(result.page.some((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_UPDATED)).toBe(true);
 
-      // Validate resourceId all activities
+      // Validate clubId all activities
       result.page.forEach((activity: Activity) => {
-        expect(activity.resourceId).toBe(clubId);
+        expect(activity.clubId).toBe(clubId);
       });
     });
 
@@ -1450,10 +1447,11 @@ describe("Club Functions", () => {
       expect(ban?.bannedBy).toBe(owner);
       expect(ban?.isActive).toBe(true);
 
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const banActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_BANNED);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const banActivity = activities.find((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_BANNED);
       expect(banActivity).toBeTruthy();
-      expect(banActivity?.relatedId).toBe(member);
+      expect(banActivity?.clubId).toBe(clubId);
+      expect(banActivity?.userId).toBe(member);
     });
 
     it("cannot ban club owner", async () => {
@@ -1589,10 +1587,11 @@ describe("Club Functions", () => {
       const updatedBan = await clubHelpers.getClubBan(ban);
       expect(updatedBan?.isActive).toBe(false);
 
-      const activities = await activityHelpers.getActivitiesForResource(clubId);
-      const unbanActivity = activities.find((a) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED);
+      const activities = await activityHelpers.getActivitiesForClub(clubId);
+      const unbanActivity = activities.find((a: Activity) => a.type === ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED);
       expect(unbanActivity).toBeTruthy();
-      expect(unbanActivity?.relatedId).toBe(member);
+      expect(unbanActivity?.clubId).toBe(clubId);
+      expect(unbanActivity?.userId).toBe(member);
     });
 
     it("fails when user is not banned", async () => {

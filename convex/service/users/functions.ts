@@ -6,10 +6,10 @@ import {
 import { authenticatedMutation, authenticatedQuery, publicQuery } from "@/convex/functions";
 import {
   createActivity as dtoCreateActivity,
-  listActivitiesForRelatedResource as dtoListActivityForUser,
+  listActivitiesForUser as dtoListActivityForUser,
 } from "@/convex/service/activities/database";
 import { activitySchema } from "@/convex/service/activities/schemas";
-import { getMetadata } from "@/convex/service/utils/metadata";
+import { getChangeMetadata } from "@/convex/service/utils/metadata";
 import { paginatedResult } from "@/convex/service/utils/pagination";
 import { enforceOwnershipOrAdmin } from "@/convex/service/utils/validators/auth";
 import { validateDateOfBirth } from "@/convex/service/utils/validators/profile";
@@ -86,8 +86,7 @@ export const createUserProfile = authenticatedMutation({ profileRequired: false 
     const profile = await dtoCreateUserProfile(ctx, input.userId, input);
 
     await dtoCreateActivity(ctx, {
-      resourceId: profile._id,
-      relatedId: currentUser._id,
+      userId: input.userId,
       type: ACTIVITY_TYPES.USER_PROFILE_CREATED,
     });
 
@@ -123,10 +122,9 @@ export const updateUserProfile = authenticatedMutation()({
     await dtoUpdateUserProfile(ctx, profile._id, input);
 
     await dtoCreateActivity(ctx, {
-      resourceId: profile._id,
-      relatedId: currentUser._id,
+      userId: input.userId,
       type: ACTIVITY_TYPES.USER_PROFILE_UPDATED,
-      metadata: getMetadata(profile, args),
+      metadata: getChangeMetadata(profile, args),
     });
   },
 });

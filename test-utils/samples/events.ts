@@ -123,13 +123,11 @@ export const createTestEventSeriesRecord = (
 });
 
 export const createTestEvent = (
-  eventSeriesId: Id<"eventSeries">,
   clubId: Id<"clubs">,
   createdBy: Id<"users">,
   date: number,
   overrides?: Partial<Event>,
 ): WithoutSystemFields<Event> => ({
-  eventSeriesId,
   clubId,
   name: "Test Event",
   description: "Test event description",
@@ -158,7 +156,6 @@ export const createTestEvent = (
 });
 
 export const createTestEventRecord = (
-  eventSeriesId: Id<"eventSeries">,
   clubId: Id<"clubs">,
   createdBy: Id<"users">,
   date: number,
@@ -166,7 +163,7 @@ export const createTestEventRecord = (
 ): Event => ({
   _id: genId<"events">("events"),
   _creationTime: Date.now(),
-  ...createTestEvent(eventSeriesId, clubId, createdBy, date, overrides),
+  ...createTestEvent(clubId, createdBy, date, overrides),
 });
 
 export const createTestEventParticipant = (
@@ -220,6 +217,12 @@ export class EventTestHelpers {
 
   async getEvent(eventId: Id<"events">) {
     return await this.t.runWithCtx((ctx) => ctx.table("events").get(eventId));
+  }
+
+  async listEventsBySeries(eventSeriesId: Id<"eventSeries">) {
+    return await this.t.runWithCtx((ctx) =>
+      ctx.table("events", "eventSeriesId", (q) => q.eq("eventSeriesId", eventSeriesId)),
+    );
   }
 
   async getEventParticipant(participantId: Id<"eventParticipants">) {

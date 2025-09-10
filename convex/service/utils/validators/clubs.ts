@@ -20,11 +20,11 @@ import { ConvexError } from "convex/values";
 import { isOwnerOrSystemAdmin } from "./auth";
 
 /**
- * Enforces that the current user has permission to modify the club.
+ * Enforces that the current user has permissions for a given club
  * User must be either the club creator, system admin, or approved club admin.
  * @param ctx - Authenticated context with profile
  * @param club - Club to check permissions for
- * @throws Error when user lacks permission to modify the club
+ * @throws Error when user lacks permissions
  */
 export const enforceClubOwnershipOrAdmin = async (ctx: AuthenticatedWithProfileCtx, club: Club) => {
   if (!isOwnerOrSystemAdmin(ctx.currentUser, club.createdBy)) {

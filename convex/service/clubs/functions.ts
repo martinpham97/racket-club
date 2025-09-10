@@ -9,10 +9,10 @@ import {
 import { authenticatedMutation, authenticatedQuery, publicQuery } from "@/convex/functions";
 import {
   createActivity as dtoCreateActivity,
-  listActivitiesForResource as dtoListActivitiesForResource,
+  listActivitiesForClub as dtoListActivitiesForClub,
 } from "@/convex/service/activities/database";
 import { activitySchema } from "@/convex/service/activities/schemas";
-import { getMetadata } from "@/convex/service/utils/metadata";
+import { getChangeMetadata } from "@/convex/service/utils/metadata";
 import { paginatedResult } from "@/convex/service/utils/pagination";
 import {
   enforceClubMembershipPermissions,
@@ -125,7 +125,7 @@ export const listClubActivities = authenticatedQuery()({
     const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await validateClubMembershipExists(ctx, club._id, ctx.currentUser._id);
 
-    return await dtoListActivitiesForResource(ctx, args.clubId, args.pagination);
+    return await dtoListActivitiesForClub(ctx, args.clubId, args.pagination);
   },
 });
 
@@ -181,8 +181,8 @@ export const requestToJoinClub = authenticatedMutation()({
     });
 
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: membership.userId,
+      clubId: club._id,
+      userId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_JOIN_REQUEST,
       metadata: [{ newValue: membership.name }],
     });
@@ -209,8 +209,8 @@ export const leaveClub = authenticatedMutation()({
 
     await updateClubMemberCount(ctx, club, -1);
     await dtoCreateActivity(ctx, {
-      resourceId: args.clubId,
-      relatedId: existingMembership.userId,
+      clubId: args.clubId,
+      userId: existingMembership.userId,
       type: ACTIVITY_TYPES.CLUB_LEFT,
       metadata: [{ previousValue: existingMembership.name }],
     });
@@ -237,8 +237,8 @@ export const createClub = authenticatedMutation()({
     const club = await dtoCreateClub(ctx, args.input, ctx.currentUser._id);
 
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: ctx.currentUser._id,
+      clubId: club._id,
+      userId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_CREATED,
       metadata: [{ newValue: args.input.name }],
     });
@@ -247,8 +247,8 @@ export const createClub = authenticatedMutation()({
       membershipInfo: args.membershipInfo,
     });
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: clubDetails.membership.userId,
+      clubId: club._id,
+      userId: clubDetails.membership.userId,
       type: ACTIVITY_TYPES.CLUB_JOINED,
       metadata: [{ newValue: clubDetails.membership.name }],
     });
@@ -283,10 +283,10 @@ export const updateClub = authenticatedMutation()({
     });
 
     await dtoCreateActivity(ctx, {
-      resourceId: args.clubId,
-      relatedId: ctx.currentUser._id,
+      clubId: args.clubId,
+      userId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_UPDATED,
-      metadata: getMetadata(club, args.input),
+      metadata: getChangeMetadata(club, args.input),
     });
 
     return updatedClub;
@@ -308,8 +308,8 @@ export const deleteClub = authenticatedMutation()({
     await ctx.table("clubs").getX(args.clubId).delete();
 
     await dtoCreateActivity(ctx, {
-      resourceId: args.clubId,
-      relatedId: ctx.currentUser._id,
+      clubId: args.clubId,
+      userId: ctx.currentUser._id,
       type: ACTIVITY_TYPES.CLUB_DELETED,
       metadata: [{ previousValue: club.name }],
     });
@@ -338,10 +338,10 @@ export const updateClubMembership = authenticatedMutation()({
     const updatedMembership = await dtoUpdateClubMembership(ctx, membership._id, args.input);
 
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: membership.userId,
+      clubId: club._id,
+      userId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_UPDATED,
-      metadata: getMetadata(membership, args.input),
+      metadata: getChangeMetadata(membership, args.input),
     });
 
     return updatedMembership;
@@ -367,8 +367,8 @@ export const removeClubMember = authenticatedMutation()({
     await ctx.table("clubMemberships").getX(args.membershipId).delete();
 
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: membership.userId,
+      clubId: club._id,
+      userId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
       metadata: [{ previousValue: membership.name }],
     });
@@ -387,6 +387,7 @@ export const approveClubMemberships = authenticatedMutation()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
   returns: z.number(),
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "bulkApproveMembers", ctx.currentUser._id);
     const { memberships, clubId } = await validateBulkMemberships(ctx, args.membershipIds);
     if (memberships.length === 0 || !clubId) {
       return 0;
@@ -400,8 +401,8 @@ export const approveClubMemberships = authenticatedMutation()({
       if (!membership.isApproved) {
         await ctx.table("clubMemberships").getX(membership._id).patch({ isApproved: true });
         await dtoCreateActivity(ctx, {
-          resourceId: membership.clubId,
-          relatedId: membership.userId,
+          clubId: membership.clubId,
+          userId: membership.userId,
           type: ACTIVITY_TYPES.CLUB_JOINED,
           metadata: [{ newValue: membership.name }],
         });
@@ -422,6 +423,7 @@ export const removeMembers = authenticatedMutation()({
   args: { membershipIds: z.array(zid("clubMemberships")) },
   returns: z.number(),
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "bulkRemoveMembers", ctx.currentUser._id);
     const { memberships, clubId } = await validateBulkMemberships(ctx, args.membershipIds);
     if (memberships.length === 0 || !clubId) {
       return 0;
@@ -438,8 +440,8 @@ export const removeMembers = authenticatedMutation()({
     for (const membership of memberships) {
       await ctx.table("clubMemberships").getX(membership._id).delete();
       await dtoCreateActivity(ctx, {
-        resourceId: club._id,
-        relatedId: membership.userId,
+        clubId: club._id,
+        userId: membership.userId,
         type: ACTIVITY_TYPES.CLUB_MEMBERSHIP_REMOVED,
         metadata: [{ previousValue: membership.name }],
       });
@@ -467,6 +469,7 @@ export const banAndRemoveClubMember = authenticatedMutation()({
     reason: clubBanReasonSchema,
   },
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "banMember", ctx.currentUser._id);
     const membership = await dtoGetClubMembershipOrThrow(ctx, args.membershipId);
     const club = await dtoGetClubOrThrow(ctx, membership.clubId);
     await enforceClubMembershipPermissions(ctx, club);
@@ -491,8 +494,8 @@ export const banAndRemoveClubMember = authenticatedMutation()({
 
     await updateClubMemberCount(ctx, club, -1);
     await dtoCreateActivity(ctx, {
-      resourceId: club._id,
-      relatedId: membership.userId,
+      clubId: club._id,
+      userId: membership.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBER_BANNED,
       metadata: [{ newValue: args.reason }],
     });
@@ -512,6 +515,7 @@ export const unbanUserFromClub = authenticatedMutation()({
     userId: zid("users"),
   },
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "unbanMember", ctx.currentUser._id);
     const club = await dtoGetClubOrThrow(ctx, args.clubId);
     await enforceClubMembershipPermissions(ctx, club);
 
@@ -523,8 +527,8 @@ export const unbanUserFromClub = authenticatedMutation()({
     await ctx.table("clubBans").getX(ban._id).patch({ isActive: false });
 
     await dtoCreateActivity(ctx, {
-      resourceId: args.clubId,
-      relatedId: args.userId,
+      clubId: args.clubId,
+      userId: args.userId,
       type: ACTIVITY_TYPES.CLUB_MEMBER_UNBANNED,
       metadata: [{ previousValue: ban.reason }],
     });

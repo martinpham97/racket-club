@@ -74,18 +74,22 @@ export const promoteWaitlistedParticipant = async (
   timeslot: Timeslot,
 ): Promise<void> => {
   const participants = await listAllEventParticipants(ctx, eventId);
-  const timeslotParticipants = participants.filter((p) => p.timeslotId === timeslotId);
+  const timeslotParticipants = participants.filter(
+    (p) => p.timeslotId === timeslotId && !p.isWaitlisted,
+  );
+  const waitlisted = participants.filter((p) => p.isWaitlisted);
 
-  if (timeslotParticipants.length < timeslot.maxParticipants) {
-    const waitlisted = timeslotParticipants.filter((p) => p.isWaitlisted);
-    if (waitlisted.length > 0) {
-      const nextParticipant = waitlisted.reduce((earliest, current) =>
-        current.joinedAt < earliest.joinedAt ? current : earliest,
-      );
-      await ctx
-        .table("eventParticipants")
-        .getX(nextParticipant._id)
-        .patch({ isWaitlisted: false, joinedAt: Date.now() });
-    }
+  if (
+    timeslotParticipants.length < timeslot.maxParticipants &&
+    waitlisted.length > 0 &&
+    waitlisted.length <= timeslot.maxParticipants
+  ) {
+    const nextParticipant = waitlisted.reduce((earliest, current) =>
+      current.joinedAt < earliest.joinedAt ? current : earliest,
+    );
+    await ctx
+      .table("eventParticipants")
+      .getX(nextParticipant._id)
+      .patch({ isWaitlisted: false, joinedAt: Date.now() });
   }
 };

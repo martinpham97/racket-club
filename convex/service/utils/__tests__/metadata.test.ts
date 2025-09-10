@@ -1,12 +1,12 @@
-import { getMetadata } from "@/convex/service/utils/metadata";
+import { getChangeMetadata } from "@/convex/service/utils/metadata";
 import { describe, expect, it } from "vitest";
 
-describe("getMetadata", () => {
+describe("getChangeMetadata", () => {
   it("returns empty array when no changes", () => {
     const original = { name: "Test", age: 25 };
     const updates = {};
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([]);
   });
@@ -15,7 +15,7 @@ describe("getMetadata", () => {
     const original = { name: "John", age: 25, active: true };
     const updates = { name: "Jane", age: 30 };
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([
       {
@@ -35,7 +35,7 @@ describe("getMetadata", () => {
     const original = { name: "John", age: 25 };
     const updates = { name: "Jane", age: undefined };
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([
       {
@@ -50,7 +50,7 @@ describe("getMetadata", () => {
     const original = { name: "John", age: 25 };
     const updates = { name: "John", age: 30 };
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([
       {
@@ -65,7 +65,7 @@ describe("getMetadata", () => {
     const original = { count: 10, active: true, score: null };
     const updates = { count: 20, active: false, score: 0 };
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([
       {
@@ -90,7 +90,7 @@ describe("getMetadata", () => {
     const original = { config: { theme: "dark" } };
     const updates = { config: { theme: "light" } };
 
-    const result = getMetadata(original, updates);
+    const result = getChangeMetadata(original, updates);
 
     expect(result).toEqual([
       {

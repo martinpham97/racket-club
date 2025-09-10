@@ -1,14 +1,18 @@
 import { internal } from "@/convex/_generated/api";
+import { ACTIVITY_TYPES } from "@/convex/constants/activities";
 import {
   AUTH_ACCESS_DENIED_ERROR,
   EVENT_CANNOT_GENERATE_DUE_TO_INACTIVE_STATUS_ERROR,
 } from "@/convex/constants/errors";
+import { EVENT_STATUS_TO_ACTIVITY_TYPE } from "@/convex/constants/events";
 import { authenticatedMutation, authenticatedQuery, internalMutation } from "@/convex/functions";
+import { createActivity as dtoCreateActivity } from "@/convex/service/activities/database";
 import {
   getClubMembershipForUser,
   getClubOrThrow,
   listUserClubIds,
 } from "@/convex/service/clubs/database";
+import { getChangeMetadata } from "@/convex/service/utils/metadata";
 import { paginatedResult } from "@/convex/service/utils/pagination";
 import {
   enforceClubOwnershipOrAdmin,
@@ -22,6 +26,7 @@ import {
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
 } from "@/convex/service/utils/validators/events";
+import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
 import {
   convexToZod,
   withSystemFields,
@@ -37,17 +42,21 @@ import {
   createEventSeries as dtoCreateEventSeries,
   getEventOrThrow as dtoGetEventOrThrow,
   getEventSeriesOrThrow as dtoGetEventSeriesOrThrow,
-  getOrCreateEventFromSeries,
   listAllEventParticipants as dtoListAllEventParticipants,
   listEventSeriesForClub as dtoListEventSeriesForClub,
   listEventsForClub as dtoListEventsForClub,
   listParticipatingEvents as dtoListParticipatingEvents,
   searchEvents as dtoSearchEvents,
   updateEventSeries as dtoUpdateEventSeries,
+  getOrCreateEventFromSeries,
 } from "./database";
 import { generateUpcomingEventDates } from "./helpers/dates";
 import { getOrCreatePermanentParticipants } from "./helpers/participants";
-import { activateEventSeries, getOrScheduleEventStatusTransitions } from "./helpers/scheduling";
+import {
+  activateEventSeries,
+  getOrScheduleEventStatusTransitions,
+  scheduleNextEventGeneration,
+} from "./helpers/scheduling";
 import {
   findUserParticipationByTimeslotId,
   getTimeslotOrThrow,
@@ -87,7 +96,7 @@ export const getEventSeries = authenticatedQuery()({
   handler: async (ctx, args) => {
     const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
     const club = await getClubOrThrow(ctx, eventSeries.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     return eventSeries;
   },
 });
@@ -104,7 +113,7 @@ export const listClubEventSeries = authenticatedQuery()({
   returns: paginatedResult(z.object(withSystemFields("eventSeries", eventSeriesSchema.shape))),
   handler: async (ctx, args) => {
     const club = await getClubOrThrow(ctx, args.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     return await dtoListEventSeriesForClub(ctx, args.clubId, args.pagination);
   },
 });
@@ -177,7 +186,7 @@ export const listMyEvents = authenticatedQuery()({
 
 /**
  * Searches for events based on query and filters
- * @param filters - Search filters (date range, clubs, skill level, location)
+ * @param filters - Search filters (date range, clubs, skill level, location, status)
  * @param pagination - Pagination options
  * @returns Paginated list of matching events
  */
@@ -190,7 +199,6 @@ export const searchEvents = authenticatedQuery()({
   handler: async (ctx, args) => {
     const { filters, pagination } = args;
     const userMemberClubIds = await listUserClubIds(ctx, ctx.currentUser._id);
-    // TODO: search events based on status
     return await dtoSearchEvents(ctx, filters, userMemberClubIds, pagination);
   },
 });
@@ -209,11 +217,20 @@ export const createEventSeries = authenticatedMutation()({
   args: { input: eventSeriesCreateInputSchema },
   returns: z.object(withSystemFields("eventSeries", eventSeriesSchema.shape)),
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "createEvent", ctx.currentUser._id);
     const club = await getClubOrThrow(ctx, args.input.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventSeriesForCreate(ctx, args.input, club);
 
     const eventSeries = await dtoCreateEventSeries(ctx, args.input, ctx.currentUser._id);
+
+    await dtoCreateActivity(ctx, {
+      eventSeriesId: eventSeries._id,
+      clubId: eventSeries.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_SERIES_CREATED,
+      metadata: [{ fieldChanged: "name", newValue: eventSeries.name }],
+    });
 
     if (args.input.isActive) {
       await activateEventSeries(ctx, eventSeries);
@@ -234,15 +251,31 @@ export const updateEventSeries = authenticatedMutation()({
   args: { eventSeriesId: zid("eventSeries"), input: eventSeriesUpdateInputSchema },
   returns: z.object(withSystemFields("eventSeries", eventSeriesSchema.shape)),
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "updateEvent", ctx.currentUser._id + args.eventSeriesId);
     const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
     const club = await getClubOrThrow(ctx, eventSeries.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventSeriesForUpdate(ctx, club, eventSeries, args.input);
 
     const updatedEventSeries = await dtoUpdateEventSeries(ctx, args.eventSeriesId, args.input);
 
-    if (!eventSeries.isActive && updatedEventSeries.isActive) {
+    await dtoCreateActivity(ctx, {
+      eventSeriesId: args.eventSeriesId,
+      clubId: eventSeries.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_SERIES_UPDATED,
+      metadata: getChangeMetadata(eventSeries, args.input),
+    });
+
+    // On updating isActive
+    if (!eventSeries.isActive && updatedEventSeries.isActive === true) {
       await activateEventSeries(ctx, eventSeries);
+    }
+
+    if (eventSeries.isActive && updatedEventSeries.isActive === false) {
+      await ctx.runMutation(internal.service.events.functions._deactivateEventSeries, {
+        eventSeriesId: args.eventSeriesId,
+      });
     }
 
     return updatedEventSeries;
@@ -259,9 +292,17 @@ export const deleteEventSeries = authenticatedMutation()({
   handler: async (ctx, args) => {
     const eventSeries = await dtoGetEventSeriesOrThrow(ctx, args.eventSeriesId);
     const club = await getClubOrThrow(ctx, eventSeries.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
 
     await ctx.table("eventSeries").getX(args.eventSeriesId).delete();
+
+    await dtoCreateActivity(ctx, {
+      eventSeriesId: args.eventSeriesId,
+      clubId: eventSeries.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_SERIES_DELETED,
+      metadata: [{ fieldChanged: "name", previousValue: eventSeries.name }],
+    });
   },
 });
 
@@ -275,11 +316,24 @@ export const createEvent = authenticatedMutation()({
   args: { input: eventCreateInputSchema },
   returns: z.object(withSystemFields("events", eventSchema.shape)),
   handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "createEvent", ctx.currentUser._id);
     const club = await getClubOrThrow(ctx, args.input.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     await validateEventForCreate(ctx, args.input, club);
 
     const event = await dtoCreateEvent(ctx, ctx.currentUser._id, args.input);
+
+    await dtoCreateActivity(ctx, {
+      eventId: event._id,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_CREATED,
+      metadata: [
+        { fieldChanged: "name", newValue: event.name },
+        { fieldChanged: "date", newValue: event.date.toString() },
+      ],
+    });
+
     return event;
   },
 });
@@ -299,7 +353,7 @@ export const generateEvents = authenticatedMutation()({
     const { eventSeriesId, startDate, endDate } = args;
     const eventSeries = await dtoGetEventSeriesOrThrow(ctx, eventSeriesId);
     const club = await getClubOrThrow(ctx, eventSeries.clubId);
-    enforceClubOwnershipOrAdmin(ctx, club);
+    await enforceClubOwnershipOrAdmin(ctx, club);
     validateEventDateRange(startDate, endDate);
 
     if (!eventSeries.isActive) {
@@ -329,6 +383,7 @@ export const joinEvent = authenticatedMutation()({
   args: { eventId: zid("events"), timeslotId: z.string() },
   returns: z.object(withSystemFields("eventParticipants", eventParticipantSchema.shape)),
   handler: async (ctx, args): Promise<EventParticipant> => {
+    await enforceRateLimit(ctx, "joinEvent", ctx.currentUser._id + args.eventId);
     const event = await dtoGetEventOrThrow(ctx, args.eventId);
     const club = await getClubOrThrow(ctx, event.clubId);
     const userId = ctx.currentUser._id;
@@ -362,6 +417,19 @@ export const joinEvent = authenticatedMutation()({
         date: event.date,
       })
       .get();
+
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_JOINED,
+      metadata: [
+        { fieldChanged: "event", newValue: event.name },
+        { fieldChanged: "timeslot", newValue: args.timeslotId },
+        { fieldChanged: "waitlisted", newValue: isWaitlisted.toString() },
+      ],
+    });
+
     return eventParticipation;
   },
 });
@@ -375,6 +443,7 @@ export const joinEvent = authenticatedMutation()({
 export const leaveEvent = authenticatedMutation()({
   args: { eventId: zid("events"), timeslotId: z.string() },
   handler: async (ctx, args): Promise<void> => {
+    await enforceRateLimit(ctx, "leaveEvent", ctx.currentUser._id + args.eventId);
     const event = await dtoGetEventOrThrow(ctx, args.eventId);
     const timeslot = getTimeslotOrThrow(event, args.timeslotId);
 
@@ -393,6 +462,18 @@ export const leaveEvent = authenticatedMutation()({
     validateEventStatusForJoinLeave(event);
 
     await ctx.table("eventParticipants").getX(userParticipation._id).delete();
+
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_LEFT,
+      metadata: [
+        { fieldChanged: "event", previousValue: event.name },
+        { fieldChanged: "timeslot", previousValue: args.timeslotId },
+      ],
+    });
+
     await promoteWaitlistedParticipant(ctx, args.eventId, args.timeslotId, timeslot);
   },
 });
@@ -412,11 +493,12 @@ export const _generateEventsForSeries = internalMutation({
       startDate: v.number(),
       endDate: v.number(),
     }),
+    scheduleNextBatch: v.optional(v.boolean()),
   },
   returns: {
     events: v.array(zodOutputToConvex(z.object(withSystemFields("events", eventSchema.shape)))),
   },
-  handler: async (ctx, { eventSeriesId, range }) => {
+  handler: async (ctx, { eventSeriesId, range, scheduleNextBatch }) => {
     const { startDate, endDate } = range;
     const series = await dtoGetEventSeriesOrThrow(ctx, eventSeriesId);
     const finalEndDate = Math.min(endDate, series.schedule.endDate);
@@ -429,6 +511,11 @@ export const _generateEventsForSeries = internalMutation({
         return event;
       }),
     );
+
+    if (scheduleNextBatch === true) {
+      await scheduleNextEventGeneration(ctx, series._id, dates);
+    }
+
     return { events };
   },
 });
@@ -444,7 +531,20 @@ export const _updateEventStatus = internalMutation({
   },
   returns: zodOutputToConvex(z.object(withSystemFields("events", eventSchema.shape))),
   handler: async (ctx, { eventId, status }) => {
-    return await ctx.table("events").getX(eventId).patch({ status }).get();
+    const event = await ctx.table("events").getX(eventId).patch({ status }).get();
+
+    // Create activity for status changes
+    await dtoCreateActivity(ctx, {
+      eventId,
+      clubId: event.clubId,
+      type: EVENT_STATUS_TO_ACTIVITY_TYPE[status],
+      metadata: [
+        { fieldChanged: "event", newValue: event.name },
+        { fieldChanged: "status", newValue: status },
+      ],
+    });
+
+    return event;
   },
 });
 
@@ -458,6 +558,27 @@ export const _deactivateEventSeries = internalMutation({
   },
   returns: zodOutputToConvex(z.object(withSystemFields("eventSeries", eventSeriesSchema.shape))),
   handler: async (ctx, { eventSeriesId }) => {
-    return await ctx.table("eventSeries").getX(eventSeriesId).patch({ isActive: false }).get();
+    const eventSeries = await ctx
+      .table("eventSeries")
+      .getX(eventSeriesId)
+      .patch({ isActive: false })
+      .get();
+
+    await dtoCreateActivity(ctx, {
+      eventSeriesId,
+      clubId: eventSeries.clubId,
+      type: ACTIVITY_TYPES.EVENT_SERIES_DEACTIVATED,
+      metadata: [
+        { fieldChanged: "name", previousValue: eventSeries.name },
+        { fieldChanged: "active", previousValue: "true", newValue: "false" },
+      ],
+    });
+
+    const nextBatchFunction = await eventSeries.edge("onNextBatchFunction");
+    if (nextBatchFunction && nextBatchFunction.state.kind === "pending") {
+      await ctx.scheduler.cancel(nextBatchFunction._id);
+    }
+
+    return eventSeries;
   },
 });
