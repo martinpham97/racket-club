@@ -4,12 +4,13 @@ import {
   AUTH_ACCESS_DENIED_ERROR,
   EVENT_CANNOT_GENERATE_DUE_TO_INACTIVE_STATUS_ERROR,
 } from "@/convex/constants/errors";
-import { EVENT_STATUS_TO_ACTIVITY_TYPE } from "@/convex/constants/events";
+import { EVENT_STATUS, EVENT_STATUS_TO_ACTIVITY_TYPE } from "@/convex/constants/events";
 import { authenticatedMutation, authenticatedQuery, internalMutation } from "@/convex/functions";
 import { createActivity as dtoCreateActivity } from "@/convex/service/activities/database";
 import {
   getClubMembershipForUser,
   getClubOrThrow,
+  listAllClubMembers,
   listUserClubIds,
 } from "@/convex/service/clubs/database";
 import { getChangeMetadata } from "@/convex/service/utils/metadata";
@@ -19,12 +20,16 @@ import {
   validateUserNotBanned,
 } from "@/convex/service/utils/validators/clubs";
 import {
+  validateAddTimeslot,
   validateEventAccess,
   validateEventDateRange,
   validateEventForCreate,
+  validateEventForUpdate,
   validateEventSeriesForCreate,
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
+  validateRemoveTimeslot,
+  validateUpdateTimeslot,
 } from "@/convex/service/utils/validators/events";
 import { enforceRateLimit } from "@/convex/service/utils/validators/rateLimit";
 import {
@@ -38,22 +43,30 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import z from "zod";
 import {
+  addEventTimeslot as dtoAddEventTimeslot,
   createEvent as dtoCreateEvent,
   createEventSeries as dtoCreateEventSeries,
   getEventOrThrow as dtoGetEventOrThrow,
   getEventSeriesOrThrow as dtoGetEventSeriesOrThrow,
+  getOrCreateEventFromSeries as dtoGetOrCreateEventFromSeries,
   listAllEventParticipants as dtoListAllEventParticipants,
   listEventSeriesForClub as dtoListEventSeriesForClub,
   listEventsForClub as dtoListEventsForClub,
   listParticipatingEvents as dtoListParticipatingEvents,
+  removeEventTimeslotWithParticipants as dtoRemoveEventTimeslotWithParticipants,
   searchEvents as dtoSearchEvents,
+  updateEvent as dtoUpdateEvent,
   updateEventSeries as dtoUpdateEventSeries,
-  getOrCreateEventFromSeries,
+  updateEventTimeslot as dtoUpdateEventTimeslot,
 } from "./database";
 import { generateUpcomingEventDates } from "./helpers/dates";
-import { getOrCreatePermanentParticipants } from "./helpers/participants";
+import {
+  getOrCreatePermanentParticipants,
+  syncPermanentParticipants,
+} from "./helpers/participants";
 import {
   activateEventSeries,
+  cancelEventScheduledFunctions,
   getOrScheduleEventStatusTransitions,
   scheduleNextEventGeneration,
 } from "./helpers/scheduling";
@@ -77,6 +90,9 @@ import {
   eventSeriesSchema,
   eventSeriesUpdateInputSchema,
   eventStatusSchema,
+  eventUpdateInputSchema,
+  timeslotInputSchema,
+  timeslotUpdateInputSchema,
 } from "./schemas";
 
 // ============================================================================
@@ -339,6 +355,63 @@ export const createEvent = authenticatedMutation()({
 });
 
 /**
+ * Updates an existing event with comprehensive validation and scheduling management
+ * @param eventId - ID of the event to update
+ * @param input - Partial event data to update (timeslots, status, timing, etc.)
+ * @returns Updated event with processed timeslots and synchronized participants
+ * @throws {ConvexError} When event not found, access denied, or validation fails
+ *
+ * **Key Features:**
+ * - Processes timeslots at database level (generates IDs, calculates participant counts)
+ * - Synchronizes permanent participants when timeslots change
+ * - Cancels scheduled functions when event is cancelled or timing changes
+ * - Reschedules status transitions for timing changes (unless cancelled)
+ * - Creates comprehensive activity logs for all changes
+ * - Validates timing constraints and business rules
+ */
+export const updateEvent = authenticatedMutation()({
+  args: { eventId: zid("events"), input: eventUpdateInputSchema },
+  returns: z.object(withSystemFields("events", eventSchema.shape)),
+  handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "updateEvent", ctx.currentUser._id + args.eventId);
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
+    const club = await getClubOrThrow(ctx, event.clubId);
+    await enforceClubOwnershipOrAdmin(ctx, club);
+    const eventUpdates = await validateEventForUpdate(ctx, club, event, args.input);
+
+    const updatedEvent = await dtoUpdateEvent(ctx, args.eventId, eventUpdates);
+
+    // Cancel any pending scheduled functions if event is cancelled or event time changes
+    if (
+      args.input.status === EVENT_STATUS.CANCELLED ||
+      args.input.startTime ||
+      args.input.endTime ||
+      args.input.date
+    ) {
+      await cancelEventScheduledFunctions(ctx, args.eventId);
+    }
+
+    // Reschedule functions for event time changes (but not for cancelled events)
+    if (
+      (args.input.startTime || args.input.endTime || args.input.date) &&
+      args.input.status !== EVENT_STATUS.CANCELLED
+    ) {
+      await getOrScheduleEventStatusTransitions(ctx, updatedEvent);
+    }
+
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_UPDATED,
+      metadata: getChangeMetadata(event, args.input),
+    });
+
+    return updatedEvent;
+  },
+});
+
+/**
  * Generates events for an active event series
  * @param eventSeriesId - ID of the event series
  * @param startDate - Start date for generation
@@ -475,6 +548,18 @@ export const leaveEvent = authenticatedMutation()({
     });
 
     await promoteWaitlistedParticipant(ctx, args.eventId, args.timeslotId, timeslot);
+
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_WAITLIST_PROMOTED,
+      metadata: [
+        { fieldChanged: "event", previousValue: event.name },
+        { fieldChanged: "timeslot", previousValue: args.timeslotId },
+        { fieldChanged: "isWaitlisted", previousValue: "true", newValue: "false" },
+      ],
+    });
   },
 });
 
@@ -505,9 +590,9 @@ export const _generateEventsForSeries = internalMutation({
     const dates = generateUpcomingEventDates(series, startDate, finalEndDate);
     const events = await Promise.all(
       dates.map(async (date) => {
-        const event = await getOrCreateEventFromSeries(ctx, series, date);
+        const event = await dtoGetOrCreateEventFromSeries(ctx, series, date);
         await getOrCreatePermanentParticipants(ctx, event);
-        await getOrScheduleEventStatusTransitions(ctx, series, event._id, date);
+        await getOrScheduleEventStatusTransitions(ctx, event);
         return event;
       }),
     );
@@ -580,5 +665,113 @@ export const _deactivateEventSeries = internalMutation({
     }
 
     return eventSeries;
+  },
+});
+
+// ============================================================================
+// TIMESLOT MANAGEMENT FUNCTIONS
+// ============================================================================
+
+/**
+ * Adds a new timeslot to an event
+ * @param eventId - ID of the event to add timeslot to
+ * @param input - Timeslot data to add
+ * @returns Updated event with new timeslot
+ * @throws {ConvexError} When validation fails or access denied
+ */
+export const addEventTimeslot = authenticatedMutation()({
+  args: {
+    eventId: zid("events"),
+    input: timeslotInputSchema,
+  },
+  returns: z.object(withSystemFields("events", eventSchema.shape)),
+  handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "updateEvent", ctx.currentUser._id + args.eventId);
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
+    const club = await getClubOrThrow(ctx, event.clubId);
+    await enforceClubOwnershipOrAdmin(ctx, club);
+    const clubMembers = await listAllClubMembers(ctx, club._id);
+    validateAddTimeslot(event, args.input, clubMembers);
+
+    const updatedEvent = await dtoAddEventTimeslot(ctx, args.eventId, args.input);
+
+    await syncPermanentParticipants(ctx, updatedEvent, event);
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_UPDATED,
+      metadata: [{ fieldChanged: "timeslots", newValue: "added" }],
+    });
+
+    return updatedEvent;
+  },
+});
+
+/**
+ * Updates an existing timeslot in an event
+ * @param eventId - ID of the event containing the timeslot
+ * @param input - Partial timeslot data to update
+ * @returns Updated event
+ * @throws {ConvexError} When validation fails or access denied
+ */
+export const updateEventTimeslot = authenticatedMutation()({
+  args: { eventId: zid("events"), input: timeslotUpdateInputSchema },
+  returns: z.object(withSystemFields("events", eventSchema.shape)),
+  handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "updateEvent", ctx.currentUser._id + args.eventId);
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
+    const club = await getClubOrThrow(ctx, event.clubId);
+    await enforceClubOwnershipOrAdmin(ctx, club);
+    const clubMembers = await listAllClubMembers(ctx, club._id);
+    validateUpdateTimeslot(event, args.input, clubMembers);
+
+    const updatedEvent = await dtoUpdateEventTimeslot(ctx, args.eventId, args.input);
+
+    await syncPermanentParticipants(ctx, updatedEvent, event);
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_UPDATED,
+      metadata: [{ fieldChanged: "timeslot", newValue: args.input.id }],
+    });
+
+    return updatedEvent;
+  },
+});
+
+/**
+ * Removes a timeslot from an event and deletes all associated participants
+ * @param eventId - ID of the event containing the timeslot
+ * @param timeslotId - ID of the timeslot to remove
+ * @returns Updated event
+ * @throws {ConvexError} When validation fails or access denied
+ */
+export const removeEventTimeslot = authenticatedMutation()({
+  args: { eventId: zid("events"), timeslotId: z.string() },
+  returns: z.object(withSystemFields("events", eventSchema.shape)),
+  handler: async (ctx, args) => {
+    await enforceRateLimit(ctx, "updateEvent", ctx.currentUser._id + args.eventId);
+    const event = await dtoGetEventOrThrow(ctx, args.eventId);
+    const club = await getClubOrThrow(ctx, event.clubId);
+    await enforceClubOwnershipOrAdmin(ctx, club);
+    validateRemoveTimeslot(event, args.timeslotId);
+
+    const updatedEvent = await dtoRemoveEventTimeslotWithParticipants(
+      ctx,
+      args.eventId,
+      args.timeslotId,
+    );
+
+    await dtoCreateActivity(ctx, {
+      eventId: args.eventId,
+      clubId: event.clubId,
+      userId: ctx.currentUser._id,
+      type: ACTIVITY_TYPES.EVENT_UPDATED,
+      metadata: [{ fieldChanged: "timeslots", previousValue: args.timeslotId }],
+    });
+
+    return updatedEvent;
   },
 });

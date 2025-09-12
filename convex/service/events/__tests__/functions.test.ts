@@ -27,6 +27,7 @@ import {
 } from "@/test-utils/samples/events";
 import { createTestProfile, UserTestHelpers } from "@/test-utils/samples/users";
 import { addDays, addMinutes } from "date-fns";
+import { nanoid } from "nanoid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/convex/service/utils/validators/rateLimit", () => ({
@@ -719,6 +720,7 @@ describe("Events Functions", () => {
 
   describe("generateEvents", () => {
     it("generates events with status transitions scheduled", async () => {
+      vi.setSystemTime(1704067200000); // Monday 2024-01-01T00:00:00.000Z
       const user = await userHelpers.insertUser();
       const userId = user._id;
       await userHelpers.insertProfile(createTestProfile(userId));
@@ -738,8 +740,8 @@ describe("Events Functions", () => {
         }),
       );
       const seriesId = series._id;
-      const startDate = FIXED_DATE;
-      const endDate = FIXED_DATE + 7 * 24 * 60 * 60 * 1000;
+      const startDate = Date.now() + 15 * TIME_MS.DAY;
+      const endDate = startDate + 15 * TIME_MS.DAY;
 
       const asUser = t.withIdentity({ subject: userId });
       const result = await asUser.mutation(api.service.events.functions.generateEvents, {
@@ -750,13 +752,13 @@ describe("Events Functions", () => {
 
       expect(result.events).toBeDefined();
       expect(Array.isArray(result.events)).toBe(true);
-      expect(result.events.length).toBe(1);
+      expect(result.events.length).toBe(2);
 
       const event = result.events[0];
       expect(event.status).toBe(EVENT_STATUS.NOT_STARTED);
 
       // Advance to event start time
-      const eventStartTime = event.date + 18 * 60 * 60 * 1000; // 6 PM on event date
+      const eventStartTime = event.date + 18 * TIME_MS.HOUR; // 6 PM on event date
       vi.advanceTimersByTime(eventStartTime - Date.now());
       await t.finishInProgressScheduledFunctions();
 
@@ -1008,6 +1010,196 @@ describe("Events Functions", () => {
       const activities = await activityHelpers.listActivitiesForEvent(eventId);
       expect(activities.some((a) => a.type === ACTIVITY_TYPES.EVENT_LEFT)).toBe(true);
     });
+  });
+
+  describe("updateEvent", () => {
+    it("updates event when user is club owner", async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const futureDate = now + 2 * 24 * 60 * 60 * 1000; // 2 days from now
+      vi.setSystemTime(now);
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, futureDate, {
+          name: "Original Event",
+          startTime: "18:00",
+          endTime: "20:00",
+        }),
+      );
+      const eventId = event._id;
+      const input = { name: "Updated Event", startTime: "19:00" };
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.updateEvent, {
+        eventId,
+        input,
+      });
+
+      expect(result.name).toBe("Updated Event");
+      expect(result.startTime).toBe("19:00");
+      expect(result.endTime).toBe("20:00"); // Should remain unchanged
+
+      vi.useRealTimers();
+    });
+
+    it("cancels scheduled functions when event is cancelled", async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const futureDate = now + 2 * 24 * 60 * 60 * 1000;
+      vi.setSystemTime(now);
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const eventSeries = await eventHelpers.insertEventSeries(
+        createTestEventSeries(clubId, userId),
+      );
+      const eventSeriesId = eventSeries._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, futureDate, {
+          startTime: "18:00",
+          endTime: "20:00",
+          eventSeriesId,
+        }),
+      );
+      const eventId = event._id;
+
+      // First schedule some functions by creating the event with scheduling
+      await t.mutation(internal.service.events.functions._generateEventsForSeries, {
+        eventSeriesId,
+        range: { startDate: futureDate - 1000, endDate: futureDate + 1000 },
+      });
+
+      const input = { status: EVENT_STATUS.CANCELLED };
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.updateEvent, {
+        eventId,
+        input,
+      });
+
+      expect(result.status).toBe(EVENT_STATUS.CANCELLED);
+
+      vi.useRealTimers();
+    });
+
+    it("reschedules functions when time is updated", async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const futureDate = now + 2 * 24 * 60 * 60 * 1000;
+      vi.setSystemTime(now);
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, futureDate, {
+          startTime: "18:00",
+          endTime: "20:00",
+        }),
+      );
+      const eventId = event._id;
+      const input = { startTime: "19:00", endTime: "21:00" };
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.updateEvent, {
+        eventId,
+        input,
+      });
+
+      expect(result.startTime).toBe("19:00");
+      expect(result.endTime).toBe("21:00");
+
+      vi.useRealTimers();
+    });
+
+    it("creates activity log when event is updated", async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const futureDate = now + 2 * 24 * 60 * 60 * 1000;
+      vi.setSystemTime(now);
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, futureDate));
+      const eventId = event._id;
+      const input = { name: "Updated Event" };
+
+      const asUser = t.withIdentity({ subject: userId });
+      await asUser.mutation(api.service.events.functions.updateEvent, {
+        eventId,
+        input,
+      });
+
+      const activities = await activityHelpers.listActivitiesForEvent(eventId);
+      expect(activities.some((a) => a.type === ACTIVITY_TYPES.EVENT_UPDATED)).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    it("throws error when user lacks permissions", async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const futureDate = now + 2 * 24 * 60 * 60 * 1000;
+      vi.setSystemTime(now);
+
+      const owner = await userHelpers.insertUser("owner@test.com");
+      const ownerId = owner._id;
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      const user = await userHelpers.insertUser("user@test.com");
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(ownerId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, ownerId, futureDate));
+      const eventId = event._id;
+      const input = { name: "Updated Event" };
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.events.functions.updateEvent, {
+          eventId,
+          input,
+        }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+
+      vi.useRealTimers();
+    });
+
+    it("throws error when updating completed event", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now(), {
+          status: EVENT_STATUS.COMPLETED,
+        }),
+      );
+      const eventId = event._id;
+      const input = { name: "Updated Event" };
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.events.functions.updateEvent, {
+          eventId,
+          input,
+        }),
+      ).rejects.toThrow();
+    });
 
     it("throws error when event not found", async () => {
       const user = await userHelpers.insertUser();
@@ -1225,6 +1417,175 @@ describe("Events Functions", () => {
       expect(updatedSeries?.onNextBatchFunctionId).toBeDefined();
 
       vi.useRealTimers();
+    });
+  });
+
+  describe("addEventTimeslot", () => {
+    it("adds timeslot to event when user is club owner", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, FIXED_DATE));
+      const eventId = event._id;
+      const originalTimeslotCount = event.timeslots.length;
+      const input = {
+        type: "duration" as const,
+        duration: 60,
+        feeType: FEE_TYPE.SPLIT,
+        maxParticipants: 8,
+        maxWaitlist: 3,
+        permanentParticipants: [userId],
+      };
+      await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, userId, { isApproved: true }),
+      );
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.addEventTimeslot, {
+        eventId,
+        input,
+      });
+
+      expect(result.timeslots).toHaveLength(originalTimeslotCount + 1);
+      const addedTimeslot = result.timeslots[result.timeslots.length - 1];
+      expect(addedTimeslot.id).toBeDefined();
+      expect(addedTimeslot.maxParticipants).toBe(8);
+      expect(addedTimeslot.permanentParticipants).toEqual([userId]);
+    });
+
+    it("throws error when user lacks permissions", async () => {
+      const owner = await userHelpers.insertUser("owner@test.com");
+      const ownerId = owner._id;
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      const user = await userHelpers.insertUser("user@test.com");
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(ownerId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, ownerId, FIXED_DATE));
+      const eventId = event._id;
+      const input = {
+        type: "duration" as const,
+        duration: 60,
+        feeType: FEE_TYPE.SPLIT,
+        maxParticipants: 8,
+        maxWaitlist: 3,
+        permanentParticipants: [],
+      };
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.events.functions.addEventTimeslot, { eventId, input }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+  });
+
+  describe("updateEventTimeslot", () => {
+    it("updates timeslot when user is club owner", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, FIXED_DATE));
+      const eventId = event._id;
+      const timeslotId = event.timeslots[0].id;
+      const input = {
+        id: timeslotId,
+        maxParticipants: 15,
+        permanentParticipants: [userId],
+      };
+      await clubHelpers.insertMembership(
+        createTestClubMembership(clubId, userId, { isApproved: true }),
+      );
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.updateEventTimeslot, {
+        eventId,
+        input,
+      });
+
+      const updatedTimeslot = result.timeslots.find((ts) => ts.id === timeslotId);
+      expect(updatedTimeslot!.maxParticipants).toBe(15);
+      expect(updatedTimeslot!.permanentParticipants).toEqual([userId]);
+    });
+
+    it("throws error when user lacks permissions", async () => {
+      const owner = await userHelpers.insertUser("owner@test.com");
+      const ownerId = owner._id;
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      const user = await userHelpers.insertUser("user@test.com");
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(ownerId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, ownerId, FIXED_DATE));
+      const eventId = event._id;
+      const timeslotId = event.timeslots[0].id;
+      const input = {
+        id: timeslotId,
+        maxParticipants: 15,
+      };
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.events.functions.updateEventTimeslot, { eventId, input }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
+    });
+  });
+
+  describe("removeEventTimeslot", () => {
+    it("removes timeslot when user is club owner", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE, {
+          timeslots: [
+            createTestTimeslot({
+              id: nanoid(),
+            }),
+            createTestTimeslot({
+              id: nanoid(),
+            }),
+          ],
+        }),
+      );
+      const eventId = event._id;
+      const originalTimeslotCount = event.timeslots.length;
+      const timeslotId = event.timeslots[0].id;
+
+      const asUser = t.withIdentity({ subject: userId });
+      const result = await asUser.mutation(api.service.events.functions.removeEventTimeslot, {
+        eventId,
+        timeslotId,
+      });
+
+      expect(result.timeslots).toHaveLength(originalTimeslotCount - 1);
+      expect(result.timeslots.find((ts) => ts.id === timeslotId)).toBeUndefined();
+    });
+
+    it("throws error when user lacks permissions", async () => {
+      const owner = await userHelpers.insertUser("owner@test.com");
+      const ownerId = owner._id;
+      await userHelpers.insertProfile(createTestProfile(ownerId));
+      const user = await userHelpers.insertUser("user@test.com");
+      const userId = user._id;
+      await userHelpers.insertProfile(createTestProfile(userId));
+      const club = await clubHelpers.insertClub(createTestClub(ownerId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, ownerId, FIXED_DATE));
+      const eventId = event._id;
+      const timeslotId = event.timeslots[0].id;
+
+      const asUser = t.withIdentity({ subject: userId });
+      await expect(
+        asUser.mutation(api.service.events.functions.removeEventTimeslot, { eventId, timeslotId }),
+      ).rejects.toThrow(AUTH_ACCESS_DENIED_ERROR);
     });
   });
 });

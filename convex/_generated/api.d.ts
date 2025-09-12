@@ -13,6 +13,7 @@ import type * as constants_activities from "../constants/activities.js";
 import type * as constants_errors from "../constants/errors.js";
 import type * as constants_events from "../constants/events.js";
 import type * as constants_rateLimitConfig from "../constants/rateLimitConfig.js";
+import type * as constants_time from "../constants/time.js";
 import type * as functions from "../functions.js";
 import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   "constants/errors": typeof constants_errors;
   "constants/events": typeof constants_events;
   "constants/rateLimitConfig": typeof constants_rateLimitConfig;
+  "constants/time": typeof constants_time;
   functions: typeof functions;
   http: typeof http;
   migrations: typeof migrations;

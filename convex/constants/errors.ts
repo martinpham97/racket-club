@@ -163,3 +163,11 @@ export const EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR =
   "Permanent participants must be unique.";
 
 export const EVENT_DATE_RANGE_INVALID_ERROR = "Date range cannot exceed 1 month (30 days).";
+
+export const EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR = "Cannot update event within 1 hour of start time.";
+
+export const EVENT_UPDATE_COMPLETED_EVENT_ERROR = "Cannot update a completed event.";
+
+export const EVENT_TIMESLOT_NOT_FOUND_ERROR = "Timeslot not found.";
+export const EVENT_TIMESLOT_MAX_LIMIT_ERROR = "Cannot exceed maximum number of timeslots.";
+export const EVENT_TIMESLOT_PARTICIPANTS_EXCEED_LIMIT_ERROR = "Cannot reduce capacity below current participant count.";

@@ -19,6 +19,7 @@ import {
   MAX_GRACE_TIME_HOURS,
   MAX_PARTICIPANTS,
   MAX_TIMESLOT_NAME_LENGTH,
+  MAX_TIMESLOTS,
   MAX_WAITLIST,
   MIN_GRACE_TIME_HOURS,
   MIN_PARTICIPANTS,
@@ -110,9 +111,9 @@ const baseTimeslotSchema = z.object({
   permanentParticipants: z.array(zid("users")).max(MAX_PARTICIPANTS),
 });
 
-const timeslotInputSchema = baseTimeslotSchema;
+export const timeslotInputSchema = baseTimeslotSchema;
 
-const timeslotSchema = baseTimeslotSchema.extend({
+export const timeslotSchema = baseTimeslotSchema.extend({
   id: z.string(),
   numParticipants: z.number(),
   numWaitlisted: z.number(),
@@ -133,7 +134,7 @@ export const baseEventSchema = z.object({
   type: z.enum([EVENT_TYPE.SOCIAL, EVENT_TYPE.TRAINING]),
   startTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
   endTime: z.string().regex(TIME_FORMAT_REGEX, TIME_FORMAT_ERROR),
-  timeslots: z.array(timeslotInputSchema).min(1),
+  timeslots: z.array(timeslotInputSchema).min(1).max(MAX_TIMESLOTS),
   paymentType: z.enum([PAYMENT_TYPE.CASH]),
   visibility: eventVisibilitySchema,
   graceTime: graceTimeSchema.optional(),
@@ -179,6 +180,8 @@ export const eventSeriesCreateInputSchema = eventSeriesSchema.omit({
   createdBy: true,
   createdAt: true,
   modifiedAt: true,
+  onNextBatchFunctionId: true,
+  onSeriesEndFunctionId: true,
 });
 
 export const eventCreateInputSchema = baseEventSchema
@@ -194,6 +197,23 @@ export const eventCreateInputSchema = baseEventSchema
 export const eventSeriesUpdateInputSchema = eventSeriesCreateInputSchema
   .omit({ clubId: true })
   .partial();
+
+export const eventUpdateInputSchema = eventSchema
+  .omit({
+    clubId: true,
+    createdBy: true,
+    createdAt: true,
+    modifiedAt: true,
+    onEventEndFunctionId: true,
+    onEventStartFunctionId: true,
+    eventSeriesId: true,
+    timeslots: true,
+  })
+  .partial();
+
+export const timeslotUpdateInputSchema = baseTimeslotSchema.partial().extend({
+  id: z.string(),
+});
 
 const baseDateRangeSchema = z.object({
   fromDate: z.number().positive(),
@@ -237,7 +257,9 @@ export type EventStatus = z.infer<typeof eventStatusSchema>;
 export type EventSeriesCreateInput = z.infer<typeof eventSeriesCreateInputSchema>;
 export type EventSeriesUpdateInput = z.infer<typeof eventSeriesUpdateInputSchema>;
 export type EventCreateInput = z.infer<typeof eventCreateInputSchema>;
+export type EventUpdateInput = z.infer<typeof eventUpdateInputSchema>;
 export type TimeslotInput = z.infer<typeof timeslotInputSchema>;
+export type TimeslotUpdateInput = z.infer<typeof timeslotUpdateInputSchema>;
 export type Timeslot = z.infer<typeof timeslotSchema>;
 export type EventFilters = z.infer<typeof eventFiltersSchema>;
 export type EventParticipantDetails = z.infer<typeof eventParticipantDetailsSchema>;
@@ -286,6 +308,7 @@ export const eventTable = defineEnt(zodToConvex(eventSchema))
 export const eventParticipantTable = defineEnt(zodToConvex(eventParticipantSchema))
   .index("userDate", ["userId", "date"])
   .index("eventUser", ["eventId", "userId"])
+  .index("eventTimeslot", ["eventId", "timeslotId"])
   .edge("event", { to: "events", field: "eventId" })
   .edge("user", { to: "users", field: "userId" });
 

@@ -11,14 +11,15 @@ import { SchedulerTestHelpers } from "@/test-utils/samples/scheduler";
 import { UserTestHelpers } from "@/test-utils/samples/users";
 
 import { internal } from "@/convex/_generated/api";
+import { TIME_MS } from "@/convex/constants/time";
 import {
   activateEventSeries,
+  cancelEventScheduledFunctions,
   getEventScheduleStatuses,
   getEventSeriesDeactivationStatus,
   getOrScheduleEventStatusTransitions,
   scheduleEventSeriesDeactivation,
   scheduleEventSeriesDeactivationAtEndDate,
-  scheduleEventStatusTransitions,
   scheduleNextEventGeneration,
 } from "@/convex/service/events/helpers/scheduling";
 import { convexTest } from "@/convex/setup.testing";
@@ -108,52 +109,12 @@ describe("Event Scheduling Helpers", () => {
     });
   });
 
-  describe("scheduleEventStatusTransitions", () => {
-    it("should schedule both start and completion transitions", async () => {
-      const user = await userHelpers.insertUser();
-      const userId = user._id;
-      const club = await clubHelpers.insertClub(createTestClub(userId));
-      const clubId = club._id;
-      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
-      const eventId = event._id;
-      const startTime = Date.now() + 1000;
-      const endTime = Date.now() + 2000;
-
-      await t.runWithCtx(async (ctx) => {
-        await scheduleEventStatusTransitions(ctx, eventId, startTime, endTime);
-      });
-
-      // Wait for any async operations to complete
-      await vi.runAllTimersAsync();
-
-      // Verify scheduled functions were created by checking edges
-      const updatedEvent = await eventHelpers.getEvent(eventId);
-      expect(updatedEvent?.onEventStartFunctionId).toBeDefined();
-      expect(updatedEvent?.onEventEndFunctionId).toBeDefined();
-      const startFunction = await schedulerHelpers.getScheduledFunction(
-        updatedEvent!.onEventStartFunctionId!,
-      );
-      const endFunction = await schedulerHelpers.getScheduledFunction(
-        updatedEvent!.onEventEndFunctionId!,
-      );
-      expect(startFunction).not.toBeNull();
-      expect(endFunction).not.toBeNull();
-      expect(startFunction!.scheduledTime).toBe(startTime);
-      expect(startFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.IN_PROGRESS }]);
-      expect(startFunction!.name).toBe("service/events/functions:_updateEventStatus");
-      expect(endFunction!.scheduledTime).toBe(endTime);
-      expect(endFunction!.args).toEqual([{ eventId, status: EVENT_STATUS.COMPLETED }]);
-      expect(endFunction!.name).toBe("service/events/functions:_updateEventStatus");
-    });
-  });
-
   describe("getOrScheduleEventStatusTransitions", () => {
     it("should schedule both start and end transitions", async () => {
       const user = await userHelpers.insertUser();
       const userId = user._id;
       const club = await clubHelpers.insertClub(createTestClub(userId));
       const clubId = club._id;
-      const series = await eventHelpers.insertEventSeries(createTestEventSeries(clubId, userId));
       const eventDate = Date.now();
       const startTime = eventDate + 1000;
       const endTime = eventDate + 2000;
@@ -163,7 +124,7 @@ describe("Event Scheduling Helpers", () => {
       mockGetUtcTimestampForDate.mockReturnValueOnce(startTime).mockReturnValueOnce(endTime);
 
       await t.runWithCtx(async (ctx) => {
-        await getOrScheduleEventStatusTransitions(ctx, series, eventId, eventDate);
+        await getOrScheduleEventStatusTransitions(ctx, event);
       });
 
       // Wait for any async operations to complete
@@ -487,6 +448,60 @@ describe("Event Scheduling Helpers", () => {
     });
   });
 
+  describe("cancelEventScheduledFunctions", () => {
+    it("should cancel pending scheduled functions", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
+      const eventId = event._id;
+
+      mockGetUtcTimestampForDate
+        .mockReturnValueOnce(Date.now())
+        .mockReturnValueOnce(Date.now() + TIME_MS.SECOND);
+
+      // Schedule transitions first
+      await t.runWithCtx(async (ctx) => {
+        await getOrScheduleEventStatusTransitions(ctx, event);
+      });
+
+      // Verify functions are pending
+      const eventWithEdges = await eventHelpers.getEvent(eventId);
+      const startFunctionId = eventWithEdges!.onEventStartFunctionId;
+      const endFunctionId = eventWithEdges!.onEventEndFunctionId;
+      expect(startFunctionId).toBeDefined();
+      expect(endFunctionId).toBeDefined();
+
+      // Cancel functions
+      await t.runWithCtx(async (ctx) => {
+        await cancelEventScheduledFunctions(ctx, eventId);
+      });
+
+      // Verify functions are cancelled
+      const startFunction = await schedulerHelpers.getScheduledFunction(startFunctionId!);
+      const endFunction = await schedulerHelpers.getScheduledFunction(endFunctionId!);
+      expect(startFunction?.state.kind).toBe("canceled");
+      expect(endFunction?.state.kind).toBe("canceled");
+    });
+
+    it("should do nothing when no scheduled functions exist", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
+      const eventId = event._id;
+
+      await t.runWithCtx(async (ctx) => {
+        await cancelEventScheduledFunctions(ctx, eventId);
+      });
+
+      // Should complete without error
+      expect(true).toBe(true);
+    });
+  });
+
   describe("getEventScheduleStatuses", () => {
     it("should return schedule statuses when they exist", async () => {
       const user = await userHelpers.insertUser();
@@ -496,9 +511,13 @@ describe("Event Scheduling Helpers", () => {
       const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
       const eventId = event._id;
 
+      mockGetUtcTimestampForDate
+        .mockReturnValueOnce(Date.now())
+        .mockReturnValueOnce(Date.now() + TIME_MS.SECOND);
+
       // Schedule transitions first
       await t.runWithCtx(async (ctx) => {
-        await scheduleEventStatusTransitions(ctx, eventId, Date.now(), Date.now() + 1000);
+        await getOrScheduleEventStatusTransitions(ctx, event);
       });
 
       const statuses = await t.runWithCtx(async (ctx) => {
@@ -539,9 +558,13 @@ describe("Event Scheduling Helpers", () => {
       const event = await eventHelpers.insertEvent(createTestEvent(clubId, userId, Date.now()));
       const eventId = event._id;
 
+      mockGetUtcTimestampForDate
+        .mockReturnValueOnce(Date.now())
+        .mockReturnValueOnce(Date.now() + TIME_MS.SECOND);
+
       // Schedule transitions
       await t.runWithCtx(async (ctx) => {
-        await scheduleEventStatusTransitions(ctx, eventId, Date.now() + 1000, Date.now() + 2000);
+        await getOrScheduleEventStatusTransitions(ctx, event);
       });
 
       // Verify functions exist and are pending

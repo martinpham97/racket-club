@@ -783,6 +783,7 @@ const userId = await userHelpers.insertUser(); // This is the full user object!
 - `t.finishAllScheduledFunctions(vi.runAllTimers)` - Complete entire scheduling chains
 
 **Critical Pattern for Scheduled Functions:**
+
 ```typescript
 // ALWAYS use this sequence:
 vi.advanceTimersByTime(delayMs);
@@ -794,6 +795,7 @@ await t.finishAllScheduledFunctions(vi.runAllTimers);
 ```
 
 **Testing Batched Generation:**
+
 ```typescript
 // Use block scoping to verify state at each step
 {

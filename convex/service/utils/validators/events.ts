@@ -7,13 +7,16 @@ import {
   EVENT_DATE_RANGE_INVALID_ERROR,
   EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR,
   EVENT_END_DATE_AFTER_START_ERROR,
-  EVENT_SERIES_DURATION_EXCEEDED_ERROR_TEMPLATE,
   EVENT_START_DATE_FUTURE_ERROR,
   EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
   EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR,
   EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR,
+  EVENT_TIMESLOT_MAX_LIMIT_ERROR,
+  EVENT_TIMESLOT_NOT_FOUND_ERROR,
   EVENT_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR,
   EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR,
+  EVENT_UPDATE_COMPLETED_EVENT_ERROR,
+  EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR,
   EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
   TIMESLOT_DURATION_NOT_MATCH_SCHEDULE_ERROR,
   TIMESLOT_DURATION_REQUIRED_ERROR,
@@ -27,11 +30,12 @@ import {
   EVENT_VISIBILITY,
   FEE_TYPE,
   MAX_EVENT_GENERATION_DATE_RANGE_DAYS,
-  MAX_EVENT_SERIES_DURATION_MONTHS,
   MAX_EVENT_START_DATE_DAYS_FROM_NOW,
   MAX_PARTICIPANTS,
+  MAX_TIMESLOTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
+import { TIME_MS } from "@/convex/constants/time";
 import {
   getClubMembershipForUser,
   getClubOrThrow,
@@ -45,14 +49,16 @@ import {
   EventSeries,
   EventSeriesCreateInput,
   EventSeriesUpdateInput,
+  EventUpdateInput,
   EventVisibility,
   TimeslotInput,
+  TimeslotUpdateInput,
 } from "@/convex/service/events/schemas";
-import { getTimeDurationInMinutes } from "@/convex/service/utils/time";
+import { getTimeDurationInMinutes, getUtcTimestampForDate } from "@/convex/service/utils/time";
 import { QueryCtx } from "@/convex/types";
 import { ConvexError } from "convex/values";
-import { differenceInDays, differenceInMonths, isFuture } from "date-fns";
-import format from "string-template";
+import { differenceInDays, isFuture } from "date-fns";
+import merge from "lodash.merge";
 
 /**
  * Validates event series for creation with club context and comprehensive error handling
@@ -155,7 +161,7 @@ export const validateEventDate = (date: number): void => {
   if (!isFuture(date)) {
     throw new ConvexError(EVENT_DATE_FUTURE_ERROR);
   }
-  if (Math.abs(differenceInDays(now, date)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
+  if (differenceInDays(date, now) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
     throw new ConvexError(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
   }
 };
@@ -185,18 +191,8 @@ export const validateRecurringSchedule = (schedule: EventSchedule): void => {
   if (schedule.endDate <= schedule.startDate) {
     throw new ConvexError(EVENT_END_DATE_AFTER_START_ERROR);
   }
-  if (Math.abs(differenceInDays(now, schedule.startDate)) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
+  if (differenceInDays(schedule.startDate, now) >= MAX_EVENT_START_DATE_DAYS_FROM_NOW) {
     throw new ConvexError(EVENT_DATE_TOO_FAR_IN_FUTURE_ERROR);
-  }
-  if (
-    Math.abs(differenceInMonths(schedule.startDate, schedule.endDate)) >=
-    MAX_EVENT_SERIES_DURATION_MONTHS
-  ) {
-    throw new ConvexError(
-      format(EVENT_SERIES_DURATION_EXCEEDED_ERROR_TEMPLATE, {
-        months: MAX_EVENT_SERIES_DURATION_MONTHS,
-      }),
-    );
   }
 };
 
@@ -380,5 +376,127 @@ export const validateEventAccess = async (
     if (!membership) {
       throw new ConvexError(AUTH_ACCESS_DENIED_ERROR);
     }
+  }
+};
+
+/**
+ * Validates event update timing constraints
+ * @param event - Event to validate
+ * @throws {ConvexError} EVENT_UPDATE_COMPLETED_EVENT_ERROR - When event is completed
+ * @throws {ConvexError} EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR - When update is within 1 hour of start
+ */
+export const validateEventUpdateTiming = (event: Event): void => {
+  if (event.status === EVENT_STATUS.COMPLETED) {
+    throw new ConvexError(EVENT_UPDATE_COMPLETED_EVENT_ERROR);
+  }
+
+  const eventStartTime = getUtcTimestampForDate(
+    event.startTime,
+    event.location.timezone,
+    event.date,
+  );
+  const oneHourBeforeStart = eventStartTime - 1 * TIME_MS.HOUR;
+
+  if (Date.now() >= oneHourBeforeStart) {
+    throw new ConvexError(EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR);
+  }
+};
+
+/**
+ * Validates event update with club context and partial validation
+ * @param ctx - Query context
+ * @param club - Club object to validate against
+ * @param existingEvent - Existing event for merging data
+ * @param eventUpdate - Partial event update input
+ */
+export const validateEventForUpdate = async (
+  ctx: QueryCtx,
+  club: Club,
+  existingEvent: Event,
+  eventUpdate: EventUpdateInput,
+): Promise<Event> => {
+  const updatedEvent: Event = merge({}, existingEvent, eventUpdate);
+  const { timeslots, visibility, startTime, endTime, date } = updatedEvent;
+
+  validateEventDate(date);
+  validateEventUpdateTiming(updatedEvent);
+  validateEventVisibility(club, visibility);
+  validateEventTime(startTime, endTime);
+  const clubMembers = await listAllClubMembers(ctx, club._id);
+  validateEventTimeslots(startTime, endTime, timeslots, clubMembers);
+
+  return updatedEvent;
+};
+
+/**
+ * Validates adding a new timeslot to an event
+ * @param event - Event to add timeslot to
+ * @param timeslotInput - Timeslot data to validate
+ * @param clubMembers - Array of club memberships
+ * @throws {ConvexError} EVENT_TIMESLOT_MAX_LIMIT_ERROR - When event already has maximum timeslots
+ */
+export const validateAddTimeslot = (
+  event: Event,
+  timeslotInput: TimeslotInput,
+  clubMembers: Array<ClubMembership>,
+): void => {
+  validateEventUpdateTiming(event);
+
+  if (event.timeslots.length >= MAX_TIMESLOTS) {
+    throw new ConvexError(EVENT_TIMESLOT_MAX_LIMIT_ERROR);
+  }
+
+  validateEventTimeslots(
+    event.startTime,
+    event.endTime,
+    [...event.timeslots, timeslotInput],
+    clubMembers,
+  );
+};
+
+/**
+ * Validates updating an existing timeslot
+ * @param event - Event containing the timeslot
+ * @param updateData - Partial timeslot update data
+ * @param clubMembers - Array of club memberships
+ * @throws {ConvexError} EVENT_TIMESLOT_NOT_FOUND_ERROR - When timeslot not found
+ * @throws {ConvexError} EVENT_TIMESLOT_PARTICIPANTS_EXCEED_LIMIT_ERROR - When reducing capacity below current participants
+ */
+export const validateUpdateTimeslot = (
+  event: Event,
+  updateData: TimeslotUpdateInput,
+  clubMembers: Array<ClubMembership>,
+): void => {
+  validateEventUpdateTiming(event);
+
+  const timeslot = event.timeslots.find((ts) => ts.id === updateData.id);
+  if (!timeslot) {
+    throw new ConvexError(EVENT_TIMESLOT_NOT_FOUND_ERROR);
+  }
+
+  const updatedTimeslots = event.timeslots.map((timeslot) =>
+    timeslot.id === updateData.id ? { ...timeslot, ...updateData } : timeslot,
+  );
+
+  validateEventTimeslots(event.startTime, event.endTime, updatedTimeslots, clubMembers);
+};
+
+/**
+ * Validates removing a timeslot from an event
+ * @param event - Event containing the timeslot
+ * @param timeslotId - ID of timeslot to remove
+ * @throws {ConvexError} EVENT_TIMESLOT_NOT_FOUND_ERROR - When timeslot not found
+ * @throws {ConvexError} EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR - When trying to remove the last timeslot
+ */
+export const validateRemoveTimeslot = (event: Event, timeslotId: string): void => {
+  validateEventUpdateTiming(event);
+
+  const timeslot = event.timeslots.find((ts) => ts.id === timeslotId);
+  if (!timeslot) {
+    throw new ConvexError(EVENT_TIMESLOT_NOT_FOUND_ERROR);
+  }
+
+  if (event.timeslots.length <= 1) {
+    throw new ConvexError(EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR);
   }
 };

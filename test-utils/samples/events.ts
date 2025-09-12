@@ -7,6 +7,7 @@ import {
   PAYMENT_TYPE,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
+import { TIME_MS } from "@/convex/constants/time";
 import {
   Event,
   EventCreateInput,
@@ -59,8 +60,8 @@ export const createTestEventSeriesInput = (
   schedule: {
     daysOfWeek: [1],
     interval: 1,
-    startDate: Date.now() + 60 * 60 * 1000,
-    endDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    startDate: Date.now() + 60 * TIME_MS.MINUTE,
+    endDate: Date.now() + 30 * TIME_MS.DAY,
   },
   paymentType: PAYMENT_TYPE.CASH,
   visibility: EVENT_VISIBILITY.PUBLIC,

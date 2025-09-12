@@ -11,8 +11,12 @@ import {
   EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
   EVENT_TIMESLOT_FEE_REQUIRED_FOR_FIXED_ERROR,
   EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR,
+  EVENT_TIMESLOT_MAX_LIMIT_ERROR,
+  EVENT_TIMESLOT_NOT_FOUND_ERROR,
   EVENT_TIMESLOT_PERMANENT_PARTICIPANT_NOT_CLUB_MEMBER_ERROR,
   EVENT_TIMESLOT_PERMANENT_PARTICIPANTS_NOT_UNIQUE_ERROR,
+  EVENT_UPDATE_COMPLETED_EVENT_ERROR,
+  EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR,
   EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
   TIMESLOT_DURATION_NOT_MATCH_SCHEDULE_ERROR,
   TIMESLOT_DURATION_REQUIRED_ERROR,
@@ -25,26 +29,32 @@ import {
   EVENT_STATUS,
   EVENT_VISIBILITY,
   FEE_TYPE,
-  MAX_EVENT_SERIES_DURATION_MONTHS,
   MAX_EVENT_START_DATE_DAYS_FROM_NOW,
   MAX_PARTICIPANTS,
+  MAX_TIMESLOTS,
   TIMESLOT_TYPE,
 } from "@/convex/constants/events";
+import { TIME_MS } from "@/convex/constants/time";
 import schema from "@/convex/schema";
 import { ClubMembership } from "@/convex/service/clubs/schemas";
 import {
   isEventDateRangeValid,
+  validateAddTimeslot,
   validateEventAccess,
   validateEventDate,
   validateEventDateRange,
   validateEventForCreate,
+  validateEventForUpdate,
   validateEventSeriesForCreate,
   validateEventSeriesForUpdate,
   validateEventStatusForJoinLeave,
   validateEventTime,
   validateEventTimeslots,
+  validateEventUpdateTiming,
   validateEventVisibility,
   validateRecurringSchedule,
+  validateRemoveTimeslot,
+  validateUpdateTimeslot,
 } from "@/convex/service/utils/validators/events";
 import { convexTest } from "@/convex/setup.testing";
 import {
@@ -57,6 +67,7 @@ import {
   createTestEventInput,
   createTestEventSeries,
   createTestEventSeriesInput,
+  createTestTimeslot,
   createTestTimeslotInput,
   EventTestHelpers,
 } from "@/test-utils/samples/events";
@@ -183,28 +194,6 @@ describe("validateRecurringSchedule", () => {
     const schedule = {
       startDate: Date.now() + ONE_DAY_MS,
       endDate: Date.now() + THIRTY_DAYS_MS,
-      daysOfWeek: [1, 2, 3],
-      interval: 1,
-    };
-
-    expect(() => validateRecurringSchedule(schedule)).not.toThrow();
-  });
-
-  it("should throw when event series duration exceeds maximum months", () => {
-    const schedule = {
-      startDate: Date.now() + ONE_DAY_MS,
-      endDate: Date.now() + (MAX_EVENT_SERIES_DURATION_MONTHS + 1) * 30 * ONE_DAY_MS,
-      daysOfWeek: [1, 2, 3],
-      interval: 1,
-    };
-
-    expect(() => validateRecurringSchedule(schedule)).toThrow();
-  });
-
-  it("should pass when event series duration is within maximum months", () => {
-    const schedule = {
-      startDate: Date.now() + ONE_DAY_MS,
-      endDate: Date.now() + (MAX_EVENT_SERIES_DURATION_MONTHS - 1) * 30 * ONE_DAY_MS,
       daysOfWeek: [1, 2, 3],
       interval: 1,
     };
@@ -836,5 +825,609 @@ describe("validateEventAccess", () => {
         AUTH_ACCESS_DENIED_ERROR,
       );
     });
+  });
+
+  describe("validateEventUpdateTiming", () => {
+    it("should pass when event is not started and more than 1 hour before start", async () => {
+      const futureTime = Date.now() + 4 * TIME_MS.HOUR;
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, futureTime, {
+          status: EVENT_STATUS.NOT_STARTED,
+          startTime: "18:00",
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).not.toThrow();
+    });
+
+    it("should throw when event is completed", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now(), {
+          status: EVENT_STATUS.COMPLETED,
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).toThrow(EVENT_UPDATE_COMPLETED_EVENT_ERROR);
+    });
+
+    it("should throw when update is within 1 hour of start time", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T12:00:00Z")); // Set base time
+
+      const eventDate = Date.now(); // Same day
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, eventDate, {
+          status: EVENT_STATUS.NOT_STARTED,
+          startTime: "12:30", // 30 minutes from system time
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).toThrow(EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR);
+      vi.useRealTimers();
+    });
+
+    it("should throw when update is exactly 1 hour before start", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+      const eventDate = Date.now();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, eventDate, {
+          status: EVENT_STATUS.NOT_STARTED,
+          startTime: "13:00", // Exactly 1 hour from system time
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).toThrow(EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR);
+      vi.useRealTimers();
+    });
+
+    it("should pass when event is in progress but more than 1 hour before original start", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+      const eventDate = Date.now();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, eventDate, {
+          status: EVENT_STATUS.IN_PROGRESS,
+          startTime: "14:30", // 2.5 hours from system time
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).not.toThrow();
+      vi.useRealTimers();
+    });
+
+    it("should pass when event is cancelled", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+      const eventDate = Date.now();
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, eventDate, {
+          status: EVENT_STATUS.CANCELLED,
+          startTime: "13:01", // Within 1 hour but cancelled
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      expect(() => validateEventUpdateTiming(event)).not.toThrow();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("validateEventForUpdate", () => {
+    it("should merge existing event with update data and validate successfully", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: true }));
+      const clubId = club._id;
+      await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+          name: "Original Event",
+          startTime: "18:00",
+          endTime: "20:00",
+          status: EVENT_STATUS.NOT_STARTED,
+        }),
+      );
+
+      const updateInput = {
+        name: "Updated Event",
+        description: "Updated description",
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await validateEventForUpdate(ctx, club, existingEvent, updateInput);
+      });
+
+      expect(result.name).toBe("Updated Event");
+      expect(result.description).toBe("Updated description");
+      expect(result.startTime).toBe("18:00");
+      expect(result.endTime).toBe("20:00");
+    });
+
+    it("should throw when private club tries to update to public visibility", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId, { isPublic: false }));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + TIME_MS.DAY),
+      );
+
+      const updateInput = {
+        visibility: EVENT_VISIBILITY.PUBLIC,
+      };
+
+      await t.runWithCtx(async (ctx) => {
+        await expect(validateEventForUpdate(ctx, club, existingEvent, updateInput)).rejects.toThrow(
+          EVENT_VISIBILITY_CANNOT_BE_PUBLIC_ERROR,
+        );
+      });
+    });
+
+    it("should throw when updating date to past", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + TIME_MS.DAY),
+      );
+
+      const updateInput = {
+        date: Date.now() - TIME_MS.DAY,
+      };
+
+      await t.runWithCtx(async (ctx) => {
+        await expect(validateEventForUpdate(ctx, club, existingEvent, updateInput)).rejects.toThrow(
+          EVENT_DATE_FUTURE_ERROR,
+        );
+      });
+    });
+
+    it("should throw when updating times to invalid range", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + TIME_MS.DAY),
+      );
+
+      const updateInput = {
+        startTime: "20:00",
+        endTime: "18:00",
+      };
+
+      await t.runWithCtx(async (ctx) => {
+        await expect(validateEventForUpdate(ctx, club, existingEvent, updateInput)).rejects.toThrow(
+          END_TIME_AFTER_START_ERROR,
+        );
+      });
+    });
+
+    it("should throw when event timing validation fails", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + 5 * TIME_MS.MINUTE, {
+          status: EVENT_STATUS.NOT_STARTED,
+          startTime: "12:05",
+          endTime: "15:00",
+          location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        }),
+      );
+
+      const updateInput = {
+        name: "Updated Event",
+      };
+
+      await t.runWithCtx(async (ctx) => {
+        await expect(validateEventForUpdate(ctx, club, existingEvent, updateInput)).rejects.toThrow(
+          EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR,
+        );
+      });
+
+      vi.useRealTimers();
+    });
+
+    it("should handle deep merge of nested objects", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + TIME_MS.DAY, {
+          location: {
+            name: "Original Location",
+            address: "Original Address",
+            placeId: "original-place",
+            timezone: "UTC",
+          },
+          levelRange: { min: 1, max: 5 },
+        }),
+      );
+
+      const updateInput = {
+        location: {
+          name: "Updated Location",
+          address: "Updated Address",
+          placeId: "updated-place",
+          timezone: "America/New_York",
+        },
+        levelRange: { min: 2, max: 4 },
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await validateEventForUpdate(ctx, club, existingEvent, updateInput);
+      });
+
+      expect(result.location.name).toBe("Updated Location");
+      expect(result.location.address).toBe("Updated Address");
+      expect(result.location.placeId).toBe("updated-place");
+      expect(result.location.timezone).toBe("America/New_York");
+      expect(result.levelRange.min).toBe(2);
+      expect(result.levelRange.max).toBe(4);
+    });
+
+    it("should validate with partial updates only", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      const existingEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, Date.now() + TIME_MS.DAY, {
+          name: "Original Event",
+          description: "Original description",
+        }),
+      );
+
+      const updateInput = {
+        description: "Updated description only",
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await validateEventForUpdate(ctx, club, existingEvent, updateInput);
+      });
+
+      expect(result.name).toBe("Original Event");
+      expect(result.description).toBe("Updated description only");
+    });
+  });
+});
+describe("validateAddTimeslot", () => {
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let eventHelpers: EventTestHelpers;
+  let clubMembers: ClubMembership[];
+
+  beforeEach(async () => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    eventHelpers = new EventTestHelpers(t);
+
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const membership = await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    clubMembers = [membership];
+  });
+
+  it("should pass when adding valid timeslot to event with capacity", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        status: EVENT_STATUS.NOT_STARTED,
+        timeslots: [createTestTimeslot()],
+      }),
+    );
+    const newTimeslot = createTestTimeslotInput();
+
+    expect(() => validateAddTimeslot(event, newTimeslot, clubMembers)).not.toThrow();
+  });
+
+  it("should throw when event has reached maximum timeslots", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const maxTimeslots = Array.from({ length: MAX_TIMESLOTS }, () => createTestTimeslot());
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: maxTimeslots,
+      }),
+    );
+    const newTimeslot = createTestTimeslotInput();
+
+    expect(() => validateAddTimeslot(event, newTimeslot, clubMembers)).toThrow(
+      EVENT_TIMESLOT_MAX_LIMIT_ERROR,
+    );
+  });
+
+  it("should throw when event timing validation fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now(), {
+        status: EVENT_STATUS.NOT_STARTED,
+        startTime: "12:30",
+        location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+      }),
+    );
+    const newTimeslot = createTestTimeslotInput();
+
+    expect(() => validateAddTimeslot(event, newTimeslot, clubMembers)).toThrow(
+      EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR,
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("should throw when new timeslot is invalid", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY),
+    );
+    const invalidTimeslot = createTestTimeslotInput({ duration: undefined });
+
+    expect(() => validateAddTimeslot(event, invalidTimeslot, clubMembers)).toThrow(
+      TIMESLOT_DURATION_REQUIRED_ERROR,
+    );
+  });
+});
+
+describe("validateUpdateTimeslot", () => {
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let eventHelpers: EventTestHelpers;
+  let clubMembers: ClubMembership[];
+
+  beforeEach(async () => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    eventHelpers = new EventTestHelpers(t);
+
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const membership = await clubHelpers.insertMembership(createTestClubMembership(clubId, userId));
+    clubMembers = [membership];
+  });
+
+  it("should pass when updating existing timeslot with valid data", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot = createTestTimeslot({ id: "test-slot-1" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: [timeslot],
+      }),
+    );
+    const updateData = { id: "test-slot-1", maxParticipants: 8 };
+
+    expect(() => validateUpdateTimeslot(event, updateData, clubMembers)).not.toThrow();
+  });
+
+  it("should throw when timeslot not found", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY),
+    );
+    const updateData = { id: "nonexistent-slot", maxParticipants: 8 };
+
+    expect(() => validateUpdateTimeslot(event, updateData, clubMembers)).toThrow(
+      EVENT_TIMESLOT_NOT_FOUND_ERROR,
+    );
+  });
+
+  it("should throw when event timing validation fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot = createTestTimeslot({ id: "test-slot-1" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now(), {
+        status: EVENT_STATUS.COMPLETED,
+        timeslots: [timeslot],
+      }),
+    );
+    const updateData = { id: "test-slot-1", maxParticipants: 8 };
+
+    expect(() => validateUpdateTimeslot(event, updateData, clubMembers)).toThrow(
+      EVENT_UPDATE_COMPLETED_EVENT_ERROR,
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("should throw when updated timeslot data is invalid", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot = createTestTimeslot({ id: "test-slot-1" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: [timeslot],
+      }),
+    );
+    const updateData = { id: "test-slot-1", maxParticipants: 0 };
+
+    expect(() => validateUpdateTimeslot(event, updateData, clubMembers)).toThrow(
+      EVENT_TIMESLOT_INVALID_MAX_PARTICIPANT_ERROR,
+    );
+  });
+
+  it("should leave other timeslots unchanged when updating specific timeslot", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot1 = createTestTimeslot({ id: "slot-1", maxParticipants: 10 });
+    const timeslot2 = createTestTimeslot({ id: "slot-2", maxParticipants: 8 });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: [timeslot1, timeslot2],
+      }),
+    );
+    const updateData = { id: "slot-1", maxParticipants: 15 };
+
+    expect(() => validateUpdateTimeslot(event, updateData, clubMembers)).not.toThrow();
+  });
+});
+
+describe("validateRemoveTimeslot", () => {
+  let t: ReturnType<typeof convexTest>;
+  let userHelpers: UserTestHelpers;
+  let clubHelpers: ClubTestHelpers;
+  let eventHelpers: EventTestHelpers;
+
+  beforeEach(() => {
+    t = convexTest(schema);
+    userHelpers = new UserTestHelpers(t);
+    clubHelpers = new ClubTestHelpers(t);
+    eventHelpers = new EventTestHelpers(t);
+  });
+
+  it("should pass when removing timeslot from event with multiple timeslots", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot1 = createTestTimeslot({ id: "slot-1" });
+    const timeslot2 = createTestTimeslot({ id: "slot-2" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: [timeslot1, timeslot2],
+      }),
+    );
+
+    expect(() => validateRemoveTimeslot(event, "slot-1")).not.toThrow();
+  });
+
+  it("should throw when timeslot not found", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY),
+    );
+
+    expect(() => validateRemoveTimeslot(event, "nonexistent-slot")).toThrow(
+      EVENT_TIMESLOT_NOT_FOUND_ERROR,
+    );
+  });
+
+  it("should throw when trying to remove the last timeslot", async () => {
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot = createTestTimeslot({ id: "only-slot" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now() + 2 * TIME_MS.DAY, {
+        timeslots: [timeslot],
+      }),
+    );
+
+    expect(() => validateRemoveTimeslot(event, "only-slot")).toThrow(
+      EVENT_TIMESLOT_AT_LEAST_ONE_REQUIRED_ERROR,
+    );
+  });
+
+  it("should throw when event timing validation fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T12:00:00Z"));
+
+    const user = await userHelpers.insertUser();
+    const userId = user._id;
+    const club = await clubHelpers.insertClub(createTestClub(userId));
+    const clubId = club._id;
+    const timeslot1 = createTestTimeslot({ id: "slot-1" });
+    const timeslot2 = createTestTimeslot({ id: "slot-2" });
+    const event = await eventHelpers.insertEvent(
+      createTestEvent(clubId, userId, Date.now(), {
+        status: EVENT_STATUS.NOT_STARTED,
+        startTime: "12:30",
+        location: { name: "Test", address: "Test", placeId: "test", timezone: "UTC" },
+        timeslots: [timeslot1, timeslot2],
+      }),
+    );
+
+    expect(() => validateRemoveTimeslot(event, "slot-1")).toThrow(
+      EVENT_UPDATE_TOO_CLOSE_TO_START_ERROR,
+    );
+
+    vi.useRealTimers();
   });
 });

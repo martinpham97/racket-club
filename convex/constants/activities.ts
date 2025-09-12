@@ -17,12 +17,14 @@ export const ACTIVITY_TYPES = {
   EVENT_SERIES_DELETED: "eventSeries:deleted",
   EVENT_SERIES_DEACTIVATED: "eventSeries:deactivated",
   EVENT_CREATED: "event:created",
+  EVENT_UPDATED: "event:updated",
   EVENT_JOINED: "event:joined",
   EVENT_LEFT: "event:left",
   EVENT_NOT_STARTED: "event:not-started",
   EVENT_IN_PROGRESS: "event:in-progress",
   EVENT_COMPLETED: "event:completed",
   EVENT_CANCELLED: "event:cancelled",
+  EVENT_WAITLIST_PROMOTED: "event:waitlist-promoted",
 } as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[keyof typeof ACTIVITY_TYPES];

@@ -1,7 +1,7 @@
 import { internal } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { EVENT_STATUS, NUM_DAYS_GENERATE_EVENTS_IN_ADVANCE } from "@/convex/constants/events";
-import { EventSeries } from "@/convex/service/events/schemas";
+import { Event, EventSeries } from "@/convex/service/events/schemas";
 import { getStartOfDayInTimezone, getUtcTimestampForDate } from "@/convex/service/utils/time";
 import { MutationCtx } from "@/convex/types";
 import { addDays, subDays } from "date-fns";
@@ -35,59 +35,40 @@ export const scheduleEventSeriesDeactivation = async (
 };
 
 /**
- * Schedules event status transitions
+ * Schedules status transitions for an event (start and completion)
  * @param ctx Mutation context
- * @param eventId ID of the event
- * @param startTime Timestamp when event should start
- * @param endTime Timestamp when event should complete
+ * @param event Event containing timing information
  */
-export const scheduleEventStatusTransitions = async (
+export const getOrScheduleEventStatusTransitions = async (
   ctx: MutationCtx,
-  eventId: Id<"events">,
-  startTime: number,
-  endTime: number,
+  event: Event,
 ): Promise<void> => {
-  const event = await ctx.table("events").getX(eventId);
+  const eventRecord = await ctx.table("events").getX(event._id);
+
+  const startTime = getUtcTimestampForDate(event.startTime, event.location.timezone, event.date);
+  const endTime = getUtcTimestampForDate(event.endTime, event.location.timezone, event.date);
 
   // Schedule start transition
-  const existingStartSchedule = await event.edge("onEventStartFunction");
+  const existingStartSchedule = await eventRecord.edge("onEventStartFunction");
   if (!existingStartSchedule) {
     const onEventStartFunctionId = await ctx.scheduler.runAt(
       startTime,
       internal.service.events.functions._updateEventStatus,
-      { eventId, status: EVENT_STATUS.IN_PROGRESS },
+      { eventId: event._id, status: EVENT_STATUS.IN_PROGRESS },
     );
-    await event.patch({ onEventStartFunctionId });
+    await eventRecord.patch({ onEventStartFunctionId });
   }
 
   // Schedule completion transition
-  const existingCompletionSchedule = await event.edge("onEventEndFunction");
+  const existingCompletionSchedule = await eventRecord.edge("onEventEndFunction");
   if (!existingCompletionSchedule) {
     const onEventEndFunctionId = await ctx.scheduler.runAt(
       endTime,
       internal.service.events.functions._updateEventStatus,
-      { eventId, status: EVENT_STATUS.COMPLETED },
+      { eventId: event._id, status: EVENT_STATUS.COMPLETED },
     );
-    await event.patch({ onEventEndFunctionId });
+    await eventRecord.patch({ onEventEndFunctionId });
   }
-};
-
-/**
- * Schedules status transitions for an event (start and completion)
- * @param ctx Mutation context
- * @param series Event series containing timing information
- * @param eventId ID of the event to schedule transitions for
- * @param date Date of the event
- */
-export const getOrScheduleEventStatusTransitions = async (
-  ctx: MutationCtx,
-  series: EventSeries,
-  eventId: Id<"events">,
-  date: number,
-): Promise<void> => {
-  const startTime = getUtcTimestampForDate(series.startTime, series.location.timezone, date);
-  const endTime = getUtcTimestampForDate(series.endTime, series.location.timezone, date);
-  await scheduleEventStatusTransitions(ctx, eventId, startTime, endTime);
 };
 
 /**
@@ -187,6 +168,27 @@ export const getEventSeriesDeactivationStatus = async (
   const series = await ctx.table("eventSeries").getX(seriesId);
   const schedule = await series.edge("onSeriesEndFunction");
   return schedule?.state.kind ?? null;
+};
+
+/**
+ * Cancels pending scheduled functions for an event
+ * @param ctx Mutation context
+ * @param eventId ID of the event
+ */
+export const cancelEventScheduledFunctions = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+): Promise<void> => {
+  const event = await ctx.table("events").getX(eventId);
+  const startFunction = await event.edge("onEventStartFunction");
+  const endFunction = await event.edge("onEventEndFunction");
+
+  if (startFunction && startFunction.state.kind === "pending") {
+    await ctx.scheduler.cancel(startFunction._id);
+  }
+  if (endFunction && endFunction.state.kind === "pending") {
+    await ctx.scheduler.cancel(endFunction._id);
+  }
 };
 
 /**

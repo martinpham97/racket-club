@@ -2,6 +2,7 @@ import { EVENT_NOT_FOUND_ERROR, EVENT_SERIES_NOT_FOUND_ERROR } from "@/convex/co
 import { EVENT_STATUS } from "@/convex/constants/events";
 import schema from "@/convex/schema";
 import {
+  addEventTimeslot,
   createEvent,
   createEventParticipation,
   createEventSeries,
@@ -11,13 +12,16 @@ import {
   getEventSeriesOrThrow,
   getOrCreateEventFromSeries,
   listAllEventParticipants,
+  listAllEventParticipantsForTimeslot,
   listEventParticipationsForUser,
   listEventSeriesForClub,
   listEventsForClub,
   listParticipatingEvents,
+  removeEventTimeslotWithParticipants,
   searchEvents,
   updateEvent,
   updateEventSeries,
+  updateEventTimeslot,
 } from "@/convex/service/events/database";
 import { convexTest } from "@/convex/setup.testing";
 import { ClubTestHelpers, createTestClub } from "@/test-utils/samples/clubs";
@@ -27,6 +31,8 @@ import {
   createTestEventParticipant,
   createTestEventSeries,
   createTestEventSeriesInput,
+  createTestTimeslot,
+  createTestTimeslotInput,
   EventTestHelpers,
 } from "@/test-utils/samples/events";
 import { UserTestHelpers } from "@/test-utils/samples/users";
@@ -353,6 +359,83 @@ describe("Events Database Service", () => {
 
       expect(result).toHaveLength(2);
       expect(result.every((p) => p.eventId === eventId)).toBe(true);
+    });
+  });
+
+  describe("listAllEventParticipantsForTimeslot", () => {
+    it("returns participants for specific timeslot", async () => {
+      const user1 = await userHelpers.insertUser("user1@test.com");
+      const userId1 = user1._id;
+      const user2 = await userHelpers.insertUser("user2@test.com");
+      const userId2 = user2._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId1));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId1, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId1, "timeslot-1", FIXED_DATE),
+      );
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId2, "timeslot-1", FIXED_DATE),
+      );
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId1, "timeslot-2", FIXED_DATE),
+      );
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await listAllEventParticipantsForTimeslot(ctx, eventId, "timeslot-1");
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result.every((p) => p.timeslotId === "timeslot-1")).toBe(true);
+    });
+
+    it("returns empty array when no participants in timeslot", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await listAllEventParticipantsForTimeslot(ctx, eventId, "nonexistent-timeslot");
+      });
+
+      expect(result).toHaveLength(0);
+    });
+
+    it("filters by both event and timeslot correctly", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const event1 = await eventHelpers.insertEvent(createTestEvent(clubId, userId, FIXED_DATE));
+      const event1Id = event1._id;
+      const event2 = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE + 86400000),
+      );
+      const event2Id = event2._id;
+
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(event1Id, userId, "timeslot-1", FIXED_DATE),
+      );
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(event2Id, userId, "timeslot-1", FIXED_DATE + 86400000),
+      );
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await listAllEventParticipantsForTimeslot(ctx, event1Id, "timeslot-1");
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].eventId).toBe(event1Id);
+      expect(result[0].timeslotId).toBe("timeslot-1");
     });
   });
 
@@ -937,6 +1020,287 @@ describe("Events Database Service", () => {
       expect(result.startTime).toBe("18:00");
       expect(result.endTime).toBe("20:00");
       expect(result.date).toBe(FIXED_DATE);
+    });
+  });
+
+  describe("addEventTimeslot", () => {
+    it("adds new timeslot to event", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+      const originalTimeslotCount = insertedEvent.timeslots.length;
+
+      const newTimeslot = createTestTimeslotInput({
+        maxParticipants: 8,
+        maxWaitlist: 3,
+        permanentParticipants: [userId],
+      });
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await addEventTimeslot(ctx, eventId, newTimeslot);
+      });
+
+      expect(result.timeslots).toHaveLength(originalTimeslotCount + 1);
+      const addedTimeslot = result.timeslots[result.timeslots.length - 1];
+      expect(addedTimeslot.id).toBeDefined();
+      expect(addedTimeslot.numParticipants).toBe(1);
+      expect(addedTimeslot.numWaitlisted).toBe(0);
+      expect(addedTimeslot.maxParticipants).toBe(8);
+    });
+
+    it("updates modifiedAt timestamp", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+      const originalModifiedAt = insertedEvent.modifiedAt!;
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const newTimeslot = createTestTimeslotInput({
+        duration: 30,
+        maxParticipants: 4,
+        maxWaitlist: 2,
+      });
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await addEventTimeslot(ctx, eventId, newTimeslot);
+      });
+
+      expect(result.modifiedAt).toBeGreaterThan(originalModifiedAt);
+    });
+  });
+
+  describe("updateEventTimeslot", () => {
+    it("updates existing timeslot", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const eventData = createTestEvent(clubId, userId, FIXED_DATE, {
+        timeslots: [createTestTimeslot({ maxParticipants: 10, maxWaitlist: 5 })],
+      });
+      const insertedEvent = await eventHelpers.insertEvent(eventData);
+      const eventId = insertedEvent._id;
+      const timeslotId = insertedEvent.timeslots[0].id;
+
+      const updateData = {
+        id: timeslotId,
+        maxParticipants: 15,
+        permanentParticipants: [userId],
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await updateEventTimeslot(ctx, eventId, updateData);
+      });
+
+      const updatedTimeslot = result.timeslots.find((ts) => ts.id === timeslotId);
+      expect(updatedTimeslot!.maxParticipants).toBe(15);
+      expect(updatedTimeslot!.permanentParticipants).toEqual([userId]);
+      expect(updatedTimeslot!.numParticipants).toBe(1);
+    });
+
+    it("recalculates participant counts with existing participants", async () => {
+      const user1 = await userHelpers.insertUser("user1@test.com");
+      const userId1 = user1._id;
+      const user2 = await userHelpers.insertUser("user2@test.com");
+      const userId2 = user2._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId1));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId1, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+      const timeslotId = insertedEvent.timeslots[0].id;
+
+      // Add participants
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId1, timeslotId, FIXED_DATE, {
+          isWaitlisted: false,
+        }),
+      );
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId2, timeslotId, FIXED_DATE, {
+          isWaitlisted: true,
+        }),
+      );
+
+      const updateData = {
+        id: timeslotId,
+        permanentParticipants: [userId1],
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await updateEventTimeslot(ctx, eventId, updateData);
+      });
+
+      const updatedTimeslot = result.timeslots.find((ts) => ts.id === timeslotId);
+      expect(updatedTimeslot!.numParticipants).toBe(2); // 1 permanent + 1 active
+      expect(updatedTimeslot!.numWaitlisted).toBe(1);
+    });
+
+    it("updates timeslot without permanentParticipants field", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE),
+      );
+      const eventId = insertedEvent._id;
+      const timeslotId = insertedEvent.timeslots[0].id;
+
+      // Add participants
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId, timeslotId, FIXED_DATE, {
+          isWaitlisted: false,
+        }),
+      );
+      await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId, timeslotId, FIXED_DATE, { isWaitlisted: true }),
+      );
+
+      const updateData = {
+        id: timeslotId,
+        startTime: "10:00",
+        endTime: "11:00",
+        // Note: permanentParticipants is undefined
+      };
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await updateEventTimeslot(ctx, eventId, updateData);
+      });
+
+      expect(result.timeslots[0].startTime).toBe("10:00");
+      expect(result.timeslots[0].endTime).toBe("11:00");
+      expect(result.timeslots[0].numParticipants).toBe(1); // Only active participants
+      expect(result.timeslots[0].numWaitlisted).toBe(1);
+    });
+
+    it("leaves other timeslots unchanged when updating specific timeslot", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+      const eventData = createTestEvent(clubId, userId, FIXED_DATE, {
+        timeslots: [
+          createTestTimeslot({ id: "slot-1", maxParticipants: 10 }),
+          createTestTimeslot({ id: "slot-2", maxParticipants: 8 }),
+        ],
+      });
+      const insertedEvent = await eventHelpers.insertEvent(eventData);
+      const eventId = insertedEvent._id;
+
+      const updateData = {
+        id: "slot-1",
+        maxParticipants: 15,
+      };
+
+      const result = await t.runWithCtx((ctx) => updateEventTimeslot(ctx, eventId, updateData));
+
+      // First timeslot should be updated
+      expect(result.timeslots[0].maxParticipants).toBe(15);
+      // Second timeslot should remain unchanged (covers line 395)
+      expect(result.timeslots[1].maxParticipants).toBe(8);
+    });
+  });
+
+  describe("removeEventTimeslotWithParticipants", () => {
+    it("removes timeslot and deletes participants", async () => {
+      const user1 = await userHelpers.insertUser("user1@test.com");
+      const userId1 = user1._id;
+      const user2 = await userHelpers.insertUser("user2@test.com");
+      const userId2 = user2._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId1));
+      const clubId = club._id;
+
+      // Create event with multiple timeslots
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId1, FIXED_DATE),
+      );
+
+      // Add a second timeslot
+      const eventWithSecondTimeslot = await t.runWithCtx(async (ctx) => {
+        return await addEventTimeslot(
+          ctx,
+          insertedEvent._id,
+          createTestTimeslotInput({ duration: 30, maxParticipants: 5, maxWaitlist: 2 }),
+        );
+      });
+
+      const eventId = eventWithSecondTimeslot._id;
+      const timeslotToRemove = eventWithSecondTimeslot.timeslots[0].id;
+      const timeslotToKeep = eventWithSecondTimeslot.timeslots[1].id;
+
+      // Add participants to both timeslots
+      const participant1 = await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId1, timeslotToRemove, FIXED_DATE),
+      );
+      const participant2 = await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId2, timeslotToRemove, FIXED_DATE),
+      );
+      const participant3 = await eventHelpers.insertEventParticipant(
+        createTestEventParticipant(eventId, userId1, timeslotToKeep, FIXED_DATE),
+      );
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await removeEventTimeslotWithParticipants(ctx, eventId, timeslotToRemove);
+      });
+
+      // Verify timeslot removed
+      expect(result.timeslots).toHaveLength(1);
+      expect(result.timeslots[0].id).toBe(timeslotToKeep);
+
+      // Verify participants deleted
+      const deletedParticipant1 = await eventHelpers.getEventParticipant(participant1._id);
+      const deletedParticipant2 = await eventHelpers.getEventParticipant(participant2._id);
+      const remainingParticipant = await eventHelpers.getEventParticipant(participant3._id);
+
+      expect(deletedParticipant1).toBeNull();
+      expect(deletedParticipant2).toBeNull();
+      expect(remainingParticipant).not.toBeNull();
+    });
+
+    it("updates modifiedAt timestamp", async () => {
+      const user = await userHelpers.insertUser();
+      const userId = user._id;
+      const club = await clubHelpers.insertClub(createTestClub(userId));
+      const clubId = club._id;
+
+      // Create event with multiple timeslots
+      const insertedEvent = await eventHelpers.insertEvent(
+        createTestEvent(clubId, userId, FIXED_DATE),
+      );
+
+      // Add a second timeslot
+      const eventWithSecondTimeslot = await t.runWithCtx(async (ctx) => {
+        return await addEventTimeslot(
+          ctx,
+          insertedEvent._id,
+          createTestTimeslotInput({ duration: 30, maxParticipants: 5, maxWaitlist: 2 }),
+        );
+      });
+
+      const eventId = eventWithSecondTimeslot._id;
+      const originalModifiedAt = eventWithSecondTimeslot.modifiedAt!;
+      const timeslotToRemove = eventWithSecondTimeslot.timeslots[0].id;
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const result = await t.runWithCtx(async (ctx) => {
+        return await removeEventTimeslotWithParticipants(ctx, eventId, timeslotToRemove);
+      });
+
+      expect(result.modifiedAt).toBeGreaterThan(originalModifiedAt);
     });
   });
 });

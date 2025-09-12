@@ -15,6 +15,8 @@ import {
   EventParticipantDetails,
   EventSeries,
   EventSeriesCreateInput,
+  TimeslotInput,
+  TimeslotUpdateInput,
 } from "./schemas";
 
 /**
@@ -157,6 +159,16 @@ export const listAllEventParticipants = async (
   return await ctx.table("events").getX(eventId).edge("participants");
 };
 
+export const listAllEventParticipantsForTimeslot = async (
+  ctx: QueryCtx,
+  eventId: Id<"events">,
+  timeslotId: string,
+): Promise<Array<EventParticipant>> => {
+  return await ctx.table("eventParticipants", "eventTimeslot", (q) =>
+    q.eq("eventId", eventId).eq("timeslotId", timeslotId),
+  );
+};
+
 /**
  * Retrieves an event for a specific series and date
  * @param ctx Query context for database operations
@@ -297,7 +309,7 @@ export const getOrCreateEventFromSeries = async (
 };
 
 /**
- * Updates an existing event in the database
+ * Updates an existing event with timeslot processing
  * @param ctx Mutation context for database operations
  * @param eventId Event ID to update
  * @param updateData Partial event data to update
@@ -313,6 +325,112 @@ export const updateEvent = async (
     .getX(eventId)
     .patch({
       ...updateData,
+      modifiedAt: Date.now(),
+    })
+    .get();
+};
+
+/**
+ * Adds a new timeslot to an event
+ * @param ctx Mutation context for database operations
+ * @param eventId Event ID to add timeslot to
+ * @param timeslotInput Timeslot data to add
+ * @returns Updated event with new timeslot
+ */
+export const addEventTimeslot = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+  timeslotInput: TimeslotInput,
+): Promise<Event> => {
+  const event = await ctx.table("events").getX(eventId);
+  const newTimeslot = {
+    ...timeslotInput,
+    id: nanoid(),
+    numParticipants: timeslotInput.permanentParticipants.length,
+    numWaitlisted: 0,
+  };
+
+  return await ctx
+    .table("events")
+    .getX(eventId)
+    .patch({
+      timeslots: [...event.timeslots, newTimeslot],
+      modifiedAt: Date.now(),
+    })
+    .get();
+};
+
+/**
+ * Updates an existing timeslot in an event
+ * @param ctx Mutation context for database operations
+ * @param eventId Event ID containing the timeslot
+ * @param updateData Partial timeslot data to update
+ * @returns Updated event
+ */
+export const updateEventTimeslot = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+  updateData: TimeslotUpdateInput,
+): Promise<Event> => {
+  const event = await ctx.table("events").getX(eventId);
+  const participants = await listAllEventParticipants(ctx, eventId);
+  const timeslotParticipants = participants.filter((p) => p.timeslotId === updateData.id);
+
+  const updatedTimeslots = event.timeslots.map((ts) => {
+    if (ts.id === updateData.id) {
+      const activeParticipants = timeslotParticipants.filter((p) => !p.isWaitlisted).length;
+      const waitlistedParticipants = timeslotParticipants.filter((p) => p.isWaitlisted).length;
+
+      return {
+        ...ts,
+        ...updateData,
+        numParticipants: updateData.permanentParticipants
+          ? updateData.permanentParticipants.length +
+            activeParticipants -
+            ts.permanentParticipants.length
+          : activeParticipants,
+        numWaitlisted: waitlistedParticipants,
+      };
+    }
+    return ts;
+  });
+
+  return await ctx
+    .table("events")
+    .getX(eventId)
+    .patch({
+      timeslots: updatedTimeslots,
+      modifiedAt: Date.now(),
+    })
+    .get();
+};
+
+/**
+ * Removes a timeslot from an event and deletes all associated participants
+ * @param ctx Mutation context for database operations
+ * @param eventId Event ID containing the timeslot
+ * @param timeslotId ID of the timeslot to remove
+ * @returns Updated event
+ */
+export const removeEventTimeslotWithParticipants = async (
+  ctx: MutationCtx,
+  eventId: Id<"events">,
+  timeslotId: string,
+): Promise<Event> => {
+  const event = await ctx.table("events").getX(eventId);
+  const participants = await listAllEventParticipants(ctx, eventId);
+
+  // Delete all participants for this timeslot
+  const timeslotParticipants = participants.filter((p) => p.timeslotId === timeslotId);
+  await Promise.all(timeslotParticipants.map((p) => deleteEventParticipation(ctx, p._id)));
+
+  const updatedTimeslots = event.timeslots.filter((ts) => ts.id !== timeslotId);
+
+  return await ctx
+    .table("events")
+    .getX(eventId)
+    .patch({
+      timeslots: updatedTimeslots,
       modifiedAt: Date.now(),
     })
     .get();
