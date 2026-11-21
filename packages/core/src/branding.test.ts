@@ -4,7 +4,7 @@ import { addMoney, formatMoney, money } from './money';
 
 describe('branding', () => {
   it('defaults to Racket Club', () => {
-    expect(resolveBranding(undefined).appName).toBe('Racket Club');
+    expect(resolveBranding(undefined).appName).toBe('Deliberately wrong');
   });
 
   it('lets the deploy-time APP_NAME replace the default', () => {
