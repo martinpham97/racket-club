@@ -3,4 +3,5 @@ services:
     image: amazon/dynamodb-local:latest
     command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
     ports:
-      - "8000:8000"
+      # Host port from DYNAMODB_PORT in .env (compose reads it), for machines where 8000 is taken.
+      - "${DYNAMODB_PORT:-8000}:8000"
