@@ -10,12 +10,13 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
   ],
-  // Starts the API (mock auth) and the web dev server; DynamoDB Local is not needed yet.
+  // Starts the API (mock auth) and the web dev server.
   webServer: [
     {
       command: 'pnpm --filter @racket-club/api dev',
       url: `http://localhost:${apiPort}/api/health`,
-      env: { AUTH_MODE: 'mock', API_PORT: apiPort },
+      // No TABLE_NAME: e2e keeps settings in memory and needs no AWS Emulator.
+      env: { AUTH_MODE: 'mock', API_PORT: apiPort, TABLE_NAME: '' },
       reuseExistingServer: !process.env.CI,
     },
     { command: 'pnpm dev', url: 'http://localhost:5173', reuseExistingServer: !process.env.CI },

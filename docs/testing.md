@@ -25,7 +25,7 @@ AWS APIs over HTTPS on `127.0.0.1:9297`. It backs `pnpm dev` and `pnpm test:int`
   `us-east-1` and `NODE_EXTRA_CA_CERTS` (the certificate is new on every start), and removes
   `AWS_PROFILE`/session variables and the real `~/.aws` files from view. Don't put `AWS_*`
   variables in `.env`.
-- **Resources**: `apps/api/src/testing/local-aws.ts` creates the table (keys, GSIs, stream as in
+- **Resources**: `apps/api/src/local-aws.ts` creates the table (keys, GSIs, stream as in
   the CDK stack), event bus, queues and uploads bucket through the SDK, before every integration
   run. Keep it in step with `infra/lib/racket-club-stack.ts`. CloudFormation is not used locally;
   it is the emulator's weakest area.
@@ -33,12 +33,23 @@ AWS APIs over HTTPS on `127.0.0.1:9297`. It backs `pnpm dev` and `pnpm test:int`
 
 ### What it covers
 
-`apps/api/src/testing/event-path.int.test.ts`:
+- `apps/api/src/testing/event-path.int.test.ts`: DynamoDB put/get and a `gsi1` query; the event
+  path: a table write appears on the DynamoDB stream (`INSERT` with the new image), is published
+  with `PutEvents` (the test plays the publisher Lambda from task 0.4), and an EventBridge rule
+  delivers it to SQS.
+- `apps/api/src/data/bookings.int.test.ts`: 20 parallel bookings for the last seat give exactly
+  one booking; 20 parallel bookings for an empty 5-seat session give exactly five; a double tap
+  books once; cancelled and missing sessions take no seat. Removing the `booked < capacity`
+  condition makes the first two fail.
+- `apps/api/src/data/idempotency.int.test.ts`: an event delivered again, in sequence and five at
+  once, runs each plugin's hook once; claims carry a TTL.
+- `apps/api/src/data/plugin-store.int.test.ts`: a plugin can't read another plugin's records
+  (whatever key it asks for, including prefix tricks), nor its own in another tenant.
+- `apps/api/src/data/settings-store.int.test.ts` and `apps/api/src/seed-data.int.test.ts`.
 
-- DynamoDB put/get and a query on `gsi1`.
-- The event path: a table write appears on the DynamoDB stream (`INSERT` with the new image), is
-  published to the event bus with `PutEvents` (the test plays the publisher Lambda from task 0.4),
-  and an EventBridge rule delivers it to an SQS queue.
+**Not proven here:** real DynamoDB cancels concurrent transactions on one item with
+`TransactionConflict`; `bookSeat` retries those with backoff. Whether the emulator produces that
+code under contention isn't known, so the retry path gets its proof from the sandbox (task 0.6).
 
 ### Emulator behaviour to know
 

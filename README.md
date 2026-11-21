@@ -26,7 +26,7 @@ Requirements: Node.js 22+, pnpm 10+, Docker (for AWS Emulator, see `docs/testing
 pnpm install
 cp .env.example .env
 pnpm dev          # web app + API with hot reload + AWS Emulator + mock sign-in
-pnpm seed         # demo coach, 20 students, a term of classes
+pnpm seed         # demo coach, 20 students, a term of classes, bookings and invoices
 ```
 
 | Command                   | What it does                                            |

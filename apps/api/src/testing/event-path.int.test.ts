@@ -27,7 +27,7 @@ import {
   SetQueueAttributesCommand,
 } from '@aws-sdk/client-sqs';
 import { afterAll, describe, expect, it } from 'vitest';
-import { localClients, localNames } from './local-aws';
+import { localClients, localNames } from '../local-aws';
 
 const c = localClients();
 const streams = new DynamoDBStreamsClient({});
