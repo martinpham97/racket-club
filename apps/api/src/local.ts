@@ -1,5 +1,7 @@
 import { serve } from '@hono/node-server';
-import { assertLocalEndpoint, createLocalResources } from './local-aws';
+import { createEventDeps } from './events/deps';
+import { startLocalEventLoop } from './events/local-loop';
+import { assertLocalEndpoint, createLocalResources, localNames } from './local-aws';
 import { buildApp } from './server';
 
 // This entry point only runs on a developer machine (Lambda uses lambda.ts), so a fresh clone
@@ -14,6 +16,12 @@ if (process.env.TABLE_NAME) {
   // through `pnpm dev`), never a real account through credentials in ~/.aws.
   assertLocalEndpoint();
   await createLocalResources();
+  // Table changes become domain events and run plugin hooks, as the Lambdas do in AWS.
+  startLocalEventLoop(
+    createEventDeps({ table: process.env.TABLE_NAME, bus: localNames.bus, env: process.env }),
+    { table: process.env.TABLE_NAME, queue: localNames.queue },
+  );
+  console.log('Local events: table stream -> EventBridge -> SQS -> plugin hooks');
 }
 
 const port = Number(process.env.API_PORT ?? 8787);

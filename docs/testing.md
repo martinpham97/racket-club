@@ -47,6 +47,31 @@ AWS APIs over HTTPS on `127.0.0.1:9297`. It backs `pnpm dev` and `pnpm test:int`
   (whatever key it asks for, including prefix tricks), nor its own in another tenant.
 - `apps/api/src/data/settings-store.int.test.ts` and `apps/api/src/seed-data.int.test.ts`.
 
+- `apps/api/src/events/pipeline.int.test.ts` (task 0.4): a booking is read from the stream,
+  published twice (a retried Lambda batch), routed by an EventBridge rule to SQS, and each copy
+  is processed twice (redelivery); the real gamification hook runs exactly once and its ledger
+  has one entry. With idempotency switched off the hook runs four times and the test fails.
+  Also: a failed hook is retried on redelivery (and only that hook), and a plugin can't emit
+  events outside its own name.
+
+### Domain events locally
+
+The emulator doesn't run our Lambdas, so `pnpm dev` runs a local event loop
+(`apps/api/src/events/local-loop.ts`): it polls the table's stream and the worker queue and calls
+the same `publishStreamRecords` and `processQueueMessage` the Lambdas call. The bus, the rule
+(`racket-club-local-worker`, every `racket-club.*` source), the queue policy and the
+dead-letter queue (after five receives) are real emulator resources, so redelivery behaves as in
+AWS. `pnpm seed` with `pnpm dev` running gives every seeded booking its gamification reward.
+
+### Lambda bundles
+
+`cdk synth` bundles each function as an ES module with the AWS SDK included, and a banner that
+defines `require` for the CommonJS dependencies. Without the banner every function failed on
+load (`Dynamic require of "node:https" is not supported`); without bundling the SDK they ran on
+the runtime's SDK version rather than the tested one. The publisher, worker and API bundles were
+each loaded in Node, and the worker bundle was invoked against the emulator. A test that loads
+the bundles belongs with the sandbox work (task 0.6).
+
 **Not proven here:** real DynamoDB cancels concurrent transactions on one item with
 `TransactionConflict`; `bookSeat` retries those with backoff. Whether the emulator produces that
 code under contention isn't known, so the retry path gets its proof from the sandbox (task 0.6).

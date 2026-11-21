@@ -1,7 +1,5 @@
 import { resolveBranding } from '@racket-club/core';
 import {
-  type PluginDefinition,
-  PluginRegistry,
   resolveTheme,
   type ThemeDefinition,
   ThemeValidationError,
@@ -9,13 +7,13 @@ import {
 } from '@racket-club/plugin-sdk';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { type AuthVariables, requireRole } from './auth';
+import { type AnyPlugin, CORE_VERSION, registryFor as registryForTenant } from './plugins';
 import type { SettingsStore } from './settings-store';
 
-export const CORE_VERSION = '0.1.0';
+export { CORE_VERSION };
 
 export interface AppDeps {
-  // biome-ignore lint/suspicious/noExplicitAny: plugins carry their own settings types
-  plugins: PluginDefinition<any>[];
+  plugins: AnyPlugin[];
   settings: SettingsStore;
   auth: MiddlewareHandler<{ Variables: AuthVariables }>;
   env: Record<string, string | undefined>;
@@ -33,14 +31,8 @@ export function createApp(deps: AppDeps) {
   });
   app.use('*', deps.auth);
 
-  /** Build a registry reflecting which plugins this tenant has switched on. */
-  const registryFor = async (tenantId: string) => {
-    const reg = new PluginRegistry(deps.plugins, CORE_VERSION);
-    for (const id of await deps.settings.getActivePlugins(tenantId)) {
-      if (reg.installed().some((p) => p.id === id)) reg.activate(id);
-    }
-    return reg;
-  };
+  const registryFor = (tenantId: string) =>
+    registryForTenant(deps.plugins, deps.settings, tenantId);
 
   const themeFor = async (tenantId: string) => {
     const reg = await registryFor(tenantId);

@@ -115,6 +115,33 @@ describe('gamification hooks', () => {
     ]);
   });
 
+  it('awards XP for booking a session, once per booking', async () => {
+    const ctx = createTestContext(plugin);
+    const reg = new PluginRegistry([plugin], '0.1.0');
+    reg.activate('gamification');
+    const idem = memoryIdempotencyStore();
+    const booked = makeEvent('booking.created', { bookingId: 'b1', sessionId: 's1', userId: 'u1' });
+
+    await reg.dispatch(booked, () => ctx, idem);
+    await reg.dispatch(booked, () => ctx, idem);
+
+    const ledger = ctx.data.get('ledger#u1') as LedgerEntry[];
+    expect(ledger.map((e) => e.reason)).toEqual(['book']);
+    expect(balanceOf(ledger)).toEqual({ xp: 2, coins: 0, level: 0 });
+  });
+
+  it('lets the coach turn the booking reward off', async () => {
+    const ctx = createTestContext(plugin, { settings: { bookSession: { xp: 0, coins: 0 } } });
+    const reg = new PluginRegistry([plugin], '0.1.0');
+    reg.activate('gamification');
+    await reg.dispatch(
+      makeEvent('booking.created', { bookingId: 'b1', sessionId: 's1', userId: 'u1' }),
+      () => ctx,
+      memoryIdempotencyStore(),
+    );
+    expect(ctx.data.get('ledger#u1')).toBeUndefined();
+  });
+
   it('awards coins for events from the stringing plugin', async () => {
     const ctx = createTestContext(plugin);
     const reg = new PluginRegistry([plugin], '0.1.0');

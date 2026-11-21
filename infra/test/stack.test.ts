@@ -6,7 +6,7 @@ import { RacketClubStack } from '../lib/racket-club-stack';
 
 const template = Template.fromStack(
   new RacketClubStack(new App(), 'Test', {
-    apiCode: lambda.Code.fromInline('exports.handler = async () => ({ statusCode: 200 })'),
+    lambdaCode: lambda.Code.fromInline('exports.handler = async () => ({ statusCode: 200 })'),
   }),
 );
 
@@ -74,9 +74,45 @@ describe('hosting', () => {
   });
 });
 
+describe('domain events', () => {
+  it('publishes the table stream to the bus, retrying and keeping failed batches', () => {
+    template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      EventSourceArn: Match.objectLike({ 'Fn::GetAtt': Match.arrayWith(['StreamArn']) }),
+      StartingPosition: 'LATEST',
+      BisectBatchOnFunctionError: true,
+      MaximumRetryAttempts: 10,
+      DestinationConfig: { OnFailure: { Destination: Match.anyValue() } },
+    });
+  });
+
+  it('routes every racket-club.* event to the worker queue', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      EventPattern: { source: [{ prefix: 'racket-club.' }] },
+      Targets: Match.arrayWith([Match.objectLike({ Arn: Match.anyValue() })]),
+    });
+  });
+
+  it('retries a message five times, then keeps it in a dead-letter queue', () => {
+    template.hasResourceProperties('AWS::SQS::Queue', {
+      RedrivePolicy: Match.objectLike({ maxReceiveCount: 5 }),
+      VisibilityTimeout: 180,
+    });
+  });
+
+  it('lets the worker report single failed messages instead of retrying the batch', () => {
+    template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      FunctionResponseTypes: ['ReportBatchItemFailures'],
+    });
+  });
+});
+
 describe('Basic vs Advanced', () => {
   it('only creates alarms and alert topics in Advanced', () => {
-    template.hasResource('AWS::CloudWatch::Alarm', { Condition: 'IsAdvanced' });
+    const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
+    expect(alarms.length).toBeGreaterThanOrEqual(2);
+    for (const alarm of alarms) {
+      expect((alarm as { Condition?: string }).Condition).toBe('IsAdvanced');
+    }
     template.hasResource('AWS::SNS::Topic', { Condition: 'IsAdvanced' });
   });
 });

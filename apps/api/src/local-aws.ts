@@ -12,16 +12,26 @@ import {
 import {
   CreateEventBusCommand,
   EventBridgeClient,
+  PutRuleCommand,
+  PutTargetsCommand,
   ResourceAlreadyExistsException,
 } from '@aws-sdk/client-eventbridge';
 import { BucketAlreadyOwnedByYou, CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
-import { CreateQueueCommand, GetQueueAttributesCommand, SQSClient } from '@aws-sdk/client-sqs';
+import {
+  CreateQueueCommand,
+  GetQueueAttributesCommand,
+  GetQueueUrlCommand,
+  QueueDoesNotExist,
+  SetQueueAttributesCommand,
+  SQSClient,
+} from '@aws-sdk/client-sqs';
 
 export const localNames = {
   table: process.env.TABLE_NAME ?? 'racket-club-local',
   bus: 'racket-club-local',
   queue: 'racket-club-local-events',
   deadLetterQueue: 'racket-club-local-events-dlq',
+  workerRule: 'racket-club-local-worker',
   uploadsBucket: 'racket-club-local-uploads',
 };
 
@@ -106,24 +116,83 @@ export async function createLocalResources() {
     .send(new CreateEventBusCommand({ Name: localNames.bus }))
     .catch(ignore(ResourceAlreadyExistsException));
 
-  // CreateQueue is idempotent when the attributes match.
-  const dlq = await c.sqs.send(new CreateQueueCommand({ QueueName: localNames.deadLetterQueue }));
-  const { Attributes } = await c.sqs.send(
-    new GetQueueAttributesCommand({ QueueUrl: dlq.QueueUrl, AttributeNames: ['QueueArn'] }),
-  );
+  // Look a queue up before creating it, then set attributes: CreateQueue refuses an existing
+  // queue unless every attribute passed matches it exactly (as in AWS), so a second run failed.
+  const ensureQueue = async (QueueName: string) => {
+    try {
+      return (await c.sqs.send(new GetQueueUrlCommand({ QueueName }))).QueueUrl;
+    } catch (err) {
+      if (!(err instanceof QueueDoesNotExist)) throw err;
+      return (await c.sqs.send(new CreateQueueCommand({ QueueName }))).QueueUrl;
+    }
+  };
+  const queueArnOf = async (QueueUrl: string | undefined) =>
+    (await c.sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] })))
+      .Attributes?.QueueArn;
+  const dlqUrl = await ensureQueue(localNames.deadLetterQueue);
+  const queueUrl = await ensureQueue(localNames.queue);
   await c.sqs.send(
-    new CreateQueueCommand({
-      QueueName: localNames.queue,
+    new SetQueueAttributesCommand({
+      QueueUrl: queueUrl,
       Attributes: {
         RedrivePolicy: JSON.stringify({
-          deadLetterTargetArn: Attributes?.QueueArn,
+          deadLetterTargetArn: await queueArnOf(dlqUrl),
           maxReceiveCount: '5',
         }),
       },
     }),
   );
+  const queueArn = await queueArnOf(queueUrl);
+  await routeEventsToQueue(c, {
+    rule: localNames.workerRule,
+    queueUrl,
+    queueArn,
+    pattern: { source: [{ prefix: 'racket-club.' }] },
+  });
 
   await c.s3
     .send(new CreateBucketCommand({ Bucket: localNames.uploadsBucket }))
     .catch(ignore(BucketAlreadyOwnedByYou));
+}
+
+/**
+ * An EventBridge rule on the local bus that delivers matching events to an SQS queue, with the
+ * queue policy that allows it (the emulator enforces queue policies, as AWS does).
+ */
+export async function routeEventsToQueue(
+  c: ReturnType<typeof localClients>,
+  opts: { rule: string; queueUrl?: string; queueArn?: string; pattern: object },
+) {
+  await c.sqs.send(
+    new SetQueueAttributesCommand({
+      QueueUrl: opts.queueUrl,
+      Attributes: {
+        Policy: JSON.stringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Service: 'events.amazonaws.com' },
+              Action: 'sqs:SendMessage',
+              Resource: opts.queueArn,
+            },
+          ],
+        }),
+      },
+    }),
+  );
+  await c.eventbridge.send(
+    new PutRuleCommand({
+      Name: opts.rule,
+      EventBusName: localNames.bus,
+      EventPattern: JSON.stringify(opts.pattern),
+    }),
+  );
+  await c.eventbridge.send(
+    new PutTargetsCommand({
+      Rule: opts.rule,
+      EventBusName: localNames.bus,
+      Targets: [{ Id: 'queue', Arn: opts.queueArn }],
+    }),
+  );
 }

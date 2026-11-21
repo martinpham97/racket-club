@@ -20,6 +20,7 @@ export interface Balance {
 }
 
 export interface EarningRules {
+  bookSession: { xp: number; coins: number };
   attend: { xp: number; coins: number };
   streak4Weeks: { xp: number; coins: number };
   payOnTime: { xp: number; coins: number };
@@ -30,6 +31,7 @@ export interface EarningRules {
 }
 
 export const DEFAULT_RULES: EarningRules = {
+  bookSession: { xp: 2, coins: 0 },
   attend: { xp: 10, coins: 5 },
   streak4Weeks: { xp: 25, coins: 15 },
   payOnTime: { xp: 5, coins: 5 },

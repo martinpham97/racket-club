@@ -105,6 +105,39 @@ describe('PluginRegistry', () => {
     expect(failures[0]?.pluginId).toBe('broken');
   });
 
+  it('retries a failed hook on the next delivery, without rerunning the ones that succeeded', async () => {
+    const calls: string[] = [];
+    let flaky = 0;
+    const good = definePlugin({
+      id: 'good',
+      ...base,
+      hooks: { 'booking.created': async () => void calls.push('good') },
+    });
+    const once = definePlugin({
+      id: 'flaky',
+      ...base,
+      hooks: {
+        'booking.created': async () => {
+          flaky += 1;
+          if (flaky === 1) throw new Error('timeout');
+          calls.push('flaky');
+        },
+      },
+    });
+    const reg = new PluginRegistry([good, once], '0.1.0');
+    reg.activate('good');
+    reg.activate('flaky');
+    const idem = memoryIdempotencyStore();
+    const evt = makeEvent('booking.created', { bookingId: 'b', sessionId: 's', userId: 'u' }, 'e2');
+
+    expect(await reg.dispatch(evt, ctxFor, idem)).toHaveLength(1); // flaky fails
+    expect(await reg.dispatch(evt, ctxFor, idem)).toEqual([]); // the queue redelivers
+    await reg.dispatch(evt, ctxFor, idem); // and once more after success
+
+    expect(calls).toEqual(['good', 'flaky']);
+    expect(flaky).toBe(2);
+  });
+
   it('applies filters in priority order', () => {
     const add = definePlugin({
       id: 'add-tab',

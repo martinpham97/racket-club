@@ -12,6 +12,8 @@ import type {
 /** Records which (plugin, event id) pairs were handled, so a retried event never runs twice. */
 export interface IdempotencyStore {
   claim(key: string): Promise<boolean>; // true if this is the first claim
+  /** Undo a claim whose handler failed, so the next delivery runs it again. */
+  release(key: string): Promise<void>;
 }
 
 export type ContextFactory = (plugin: PluginDefinition<unknown>) => PluginContext<unknown>;
@@ -89,7 +91,8 @@ export class PluginRegistry {
 
   /**
    * Run every active plugin's hook for an event. A failing hook is reported, never thrown,
-   * so it can't fail the student's booking. Each (plugin, event) pair runs at most once.
+   * so it can't fail the student's booking. Each (plugin, event) pair succeeds at most once:
+   * a failed hook gives its claim back, so the queue's next delivery retries just that hook.
    */
   async dispatch(
     event: DomainEvent,
@@ -103,12 +106,13 @@ export class PluginRegistry {
         | ((e: DomainEvent, c: PluginContext<unknown>) => Promise<void>)
         | undefined;
       if (!handler) continue;
-      const first = await idempotency.claim(`${plugin.id}#${event.id}`);
-      if (!first) continue;
+      const key = `${plugin.id}#${event.id}`;
+      if (!(await idempotency.claim(key))) continue;
       try {
         await handler(event, makeContext(plugin));
       } catch (error) {
         failures.push({ pluginId: plugin.id, eventId: event.id, error });
+        await idempotency.release(key);
       }
     }
     return failures;
