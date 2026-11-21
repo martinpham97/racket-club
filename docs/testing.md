@@ -54,6 +54,29 @@ AWS APIs over HTTPS on `127.0.0.1:9297`. It backs `pnpm dev` and `pnpm test:int`
   Also: a failed hook is retried on redelivery (and only that hook), and a plugin can't emit
   events outside its own name.
 
+- `apps/api/src/sign-in.int.test.ts` (task 0.5): the user store creates a record once even when
+  the sign-up trigger and `/api/me` race, and saves onboarding (a guardian only for juniors); the
+  post-confirmation trigger creates the student and adds them to the `student` group (run twice,
+  as Cognito may); Google setup creates the identity provider, adds Google to the app client
+  while keeping its other settings, stores the secret as a SecureString, and puts Google back
+  after a simulated stack update. All of it runs on the emulator's Cognito and SSM.
+
+### Sign-in: what only the sandbox proves
+
+Real Google, Cognito managed login (the pages, MFA setup, the code-for-token exchange) and API
+Gateway's JWT check don't run locally: `pnpm dev` and e2e use mock sign-in. They are task 0.5's
+done-when, checked in the sandbox stack: a new Google account signs up, lands on onboarding and
+appears as a student; the coach signs in with the emailed temporary password and sets up MFA.
+The web app's PKCE helpers are unit-tested (`apps/web/src/auth/pkce.test.ts`).
+
+### E2E and the Vite cache
+
+`apps/web/vite.config.ts` lists the app's dependencies in `optimizeDeps.include`. Without it,
+Vite discovers them during the first page load, re-bundles and reloads the page, and on a cold
+cache (every CI run, or after a lockfile change) tests lost half-filled forms or saw a blank
+page: two cold runs without it failed 2 and 3 tests; three cold runs with it passed every test.
+Add new browser dependencies there too.
+
 ### Domain events locally
 
 The emulator doesn't run our Lambdas, so `pnpm dev` runs a local event loop

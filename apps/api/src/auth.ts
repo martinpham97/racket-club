@@ -1,3 +1,4 @@
+import { pickLocale } from '@racket-club/i18n';
 import type { MiddlewareHandler } from 'hono';
 
 export type Role = 'owner' | 'staff' | 'student';
@@ -5,8 +6,13 @@ export type Role = 'owner' | 'staff' | 'student';
 export interface AuthUser {
   id: string;
   email: string;
+  /** From the token (Google profile) or the mock user; the stored profile can override it. */
+  name: string;
+  locale: 'en' | 'vi';
   roles: Role[];
 }
+
+const nameFromEmail = (email: string) => email.split('@')[0] || email;
 
 export type AuthVariables = { user: AuthUser | null };
 
@@ -22,7 +28,13 @@ export const mockAuth: MiddlewareHandler<{ Variables: AuthVariables }> = async (
     try {
       const parsed = JSON.parse(raw) as Partial<AuthUser>;
       if (parsed.id && parsed.email) {
-        user = { id: parsed.id, email: parsed.email, roles: parsed.roles ?? ['student'] };
+        user = {
+          id: parsed.id,
+          email: parsed.email,
+          name: parsed.name ?? nameFromEmail(parsed.email),
+          locale: pickLocale(parsed.locale, 'en'),
+          roles: parsed.roles ?? ['student'],
+        };
       }
     } catch {
       return c.json({ error: 'bad x-mock-user header' }, 400);
@@ -54,7 +66,15 @@ export const cognitoAuth: MiddlewareHandler<{ Variables: AuthVariables }> = asyn
     const roles = groups.filter(
       (g): g is Role => g === 'owner' || g === 'staff' || g === 'student',
     );
-    user = { id: claims.sub, email: claims.email ?? '', roles: roles.length ? roles : ['student'] };
+    const email = claims.email ?? '';
+    user = {
+      id: claims.sub,
+      email,
+      name: claims.name ?? nameFromEmail(email),
+      // Google sends its profile language (e.g. "vi" or "en-AU") through the `locale` attribute.
+      locale: pickLocale(claims.locale, 'en'),
+      roles: roles.length ? roles : ['student'],
+    };
   }
   c.set('user', user);
   await next();

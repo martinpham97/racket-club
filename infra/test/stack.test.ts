@@ -54,6 +54,61 @@ describe('auth', () => {
     });
   });
 
+  it('requires MFA (authenticator app) for password accounts', () => {
+    template.hasResourceProperties('AWS::Cognito::UserPool', {
+      MfaConfiguration: 'ON',
+      EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+    });
+  });
+
+  it('runs the sign-up trigger after confirmation', () => {
+    template.hasResourceProperties('AWS::Cognito::UserPool', {
+      LambdaConfig: { PostConfirmation: Match.anyValue() },
+    });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: 'cognito-idp:AdminAddUserToGroup' }),
+        ]),
+      },
+    });
+  });
+
+  it('gives the managed login pages their branding', () => {
+    template.hasResourceProperties('AWS::Cognito::ManagedLoginBranding', {
+      UseCognitoProvidedValues: true,
+    });
+  });
+
+  it('lets the API configure Google only for this pool and its own parameters', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(['cognito-idp:UpdateUserPoolClient']),
+            Resource: { 'Fn::GetAtt': [Match.stringLikeRegexp('^Users'), 'Arn'] },
+          }),
+          Match.objectLike({
+            Action: ['ssm:GetParameters', 'ssm:PutParameter'],
+            Resource: Match.objectLike({
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp('/google/\\*$')]),
+              ]),
+            }),
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('re-applies Google sign-in on every deploy, after the app client', () => {
+    const [id, resource] = Object.entries(
+      template.findResources('AWS::CloudFormation::CustomResource'),
+    )[0] as [string, { DependsOn?: string[] }];
+    expect(id).toMatch(/^ReapplyGoogleSignIn/);
+    expect(resource.DependsOn?.some((d) => d.startsWith('UsersWebClient'))).toBe(true);
+  });
+
   it('protects every API route except health, config and theme', () => {
     const routes = template.findResources('AWS::ApiGatewayV2::Route');
     const open = Object.values(routes)

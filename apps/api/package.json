@@ -9,10 +9,12 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1175.0",
     "@aws-sdk/client-dynamodb": "^3.1175.0",
     "@aws-sdk/client-dynamodb-streams": "^3.1175.0",
     "@aws-sdk/client-eventbridge": "^3.1175.0",
     "@aws-sdk/client-sqs": "^3.1175.0",
+    "@aws-sdk/client-ssm": "^3.1175.0",
     "@aws-sdk/lib-dynamodb": "^3.1175.0",
     "@aws-sdk/util-dynamodb": "^3.996.9",
     "@hono/node-server": "^1.19.0",

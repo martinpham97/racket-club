@@ -7,6 +7,7 @@ import {
   CfnOutput,
   CfnParameter,
   type CfnResource,
+  CustomResource,
   Duration,
   Fn,
   RemovalPolicy,
@@ -23,6 +24,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { DynamoEventSource, SqsDlq, SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -30,6 +32,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as cr from 'aws-cdk-lib/custom-resources';
 import type { Construct } from 'constructs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -124,7 +127,10 @@ export class RacketClubStack extends Stack {
       selfSignUpEnabled: true, // email sign-up is the fallback until Google is configured
       signInAliases: { email: true },
       autoVerify: { email: true },
-      mfa: cognito.Mfa.OPTIONAL,
+      // Required, because managed login only offers MFA setup when it is: the coach and staff
+      // must use it (docs/design.md). It applies to password accounts only; Cognito doesn't
+      // apply MFA to Google sign-ins, so it only affects students using the email fallback.
+      mfa: cognito.Mfa.REQUIRED,
       mfaSecondFactor: { sms: false, otp: true },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: RemovalPolicy.RETAIN,
@@ -289,6 +295,74 @@ export class RacketClubStack extends Stack {
       cognitoDomain: { domainPrefix: `rc-${Aws.ACCOUNT_ID}-${Aws.REGION}` },
       managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
+    // The newer managed login shows "login pages unavailable" for a client without branding.
+    new cognito.CfnManagedLoginBranding(this, 'LoginBranding', {
+      userPoolId: userPool.userPoolId,
+      clientId: client.userPoolClientId,
+      useCognitoProvidedValues: true,
+    });
+
+    // ---- Sign-up: a confirmed account gets its USER record and the student group ----------
+    const postConfirmation = lambdaFn(
+      'PostConfirmation',
+      'lambda-post-confirmation.ts',
+      Duration.seconds(10),
+    );
+    postConfirmation.addEnvironment('TABLE_NAME', table.tableName);
+    table.grantReadWriteData(postConfirmation);
+    // The pool ARN can't be referenced here: the pool already depends on this function.
+    postConfirmation.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cognito-idp:AdminAddUserToGroup'],
+        resources: [
+          this.formatArn({ service: 'cognito-idp', resource: 'userpool', resourceName: '*' }),
+        ],
+      }),
+    );
+    userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, postConfirmation);
+
+    // ---- Setup wizard, Google sign-in (apps/api/src/google-sign-in.ts) -------------------
+    const ssmPrefix = `/racket-club/${this.stackName}`;
+    const googleParameters = this.formatArn({
+      service: 'ssm',
+      resource: 'parameter',
+      resourceName: `racket-club/${this.stackName}/google/*`,
+    });
+    const configureGoogle = new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:DescribeIdentityProvider',
+        'cognito-idp:CreateIdentityProvider',
+        'cognito-idp:UpdateIdentityProvider',
+        'cognito-idp:DescribeUserPoolClient',
+        'cognito-idp:UpdateUserPoolClient',
+      ],
+      resources: [userPool.userPoolArn],
+    });
+    const googleEnv = {
+      USER_POOL_ID: userPool.userPoolId,
+      USER_POOL_CLIENT_ID: client.userPoolClientId,
+      SSM_PREFIX: ssmPrefix,
+    };
+
+    // A stack update resets the app client to email-only sign-in; this puts Google back.
+    const reapplyGoogle = lambdaFn(
+      'ReapplyGoogle',
+      'lambda-reapply-google.ts',
+      Duration.seconds(30),
+    );
+    for (const [k, v] of Object.entries(googleEnv)) reapplyGoogle.addEnvironment(k, v);
+    reapplyGoogle.addToRolePolicy(configureGoogle);
+    reapplyGoogle.addToRolePolicy(
+      new iam.PolicyStatement({ actions: ['ssm:GetParameters'], resources: [googleParameters] }),
+    );
+    const reapply = new CustomResource(this, 'ReapplyGoogleSignIn', {
+      serviceToken: new cr.Provider(this, 'ReapplyGoogleProvider', {
+        onEventHandler: reapplyGoogle,
+      }).serviceToken,
+      // Changes on every synth, so it runs on every deploy (the handler is idempotent).
+      properties: { DeployedAt: new Date().toISOString() },
+    });
+    reapply.node.addDependency(client);
 
     const authorizer = new HttpJwtAuthorizer(
       'Jwt',
@@ -314,6 +388,14 @@ export class RacketClubStack extends Stack {
     apiFn.addEnvironment('AUTH_MODE', 'cognito');
     apiFn.addEnvironment('USER_POOL_CLIENT_ID', client.userPoolClientId);
     apiFn.addEnvironment('COGNITO_DOMAIN', domain.baseUrl());
+    for (const [k, v] of Object.entries(googleEnv)) apiFn.addEnvironment(k, v);
+    apiFn.addToRolePolicy(configureGoogle);
+    apiFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameters', 'ssm:PutParameter'],
+        resources: [googleParameters],
+      }),
+    );
 
     // Web assets: deployed when apps/web has been built (always true in the release pipeline).
     const webDist = join(repoRoot, 'apps/web/dist');
