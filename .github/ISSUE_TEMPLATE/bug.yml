@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in Racket Club doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as a student
+        2. Open Sessions
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Student app
+        - Admin console
+        - Deploy / AWS stack
+        - Local development
+        - A plugin
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release version or commit SHA.
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Setup mode
+      options:
+        - Basic
+        - Advanced
+        - Not deployed (local)
+  - type: textarea
+    id: extra
+    attributes:
+      label: Logs, screenshots, device and browser
+      description: Remove any student names, emails or phone numbers first.

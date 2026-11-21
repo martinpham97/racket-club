@@ -1,0 +1,39 @@
+name: Plugin idea
+description: Propose a plugin, or an extension point a plugin would need.
+labels: [plugin]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Plugin name
+      placeholder: e.g. tournament-draws
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does
+      description: Who uses it, and what they get.
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: Core events, routes and UI slots it needs
+      description: e.g. a `booking.created` hook, an admin page, a slot on the profile screen.
+  - type: textarea
+    id: missing
+    attributes:
+      label: Missing extension points
+      description: Anything the plugin SDK can't do yet. These get added to the SDK, never as plugin-specific code in core.
+  - type: textarea
+    id: services
+    attributes:
+      label: External services and cost
+      description: Third-party APIs (Stripe, Meta, SMS...) or paid AWS services it would use.
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Building it
+      options:
+        - label: I'd like to build this myself

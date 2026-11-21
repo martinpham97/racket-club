@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a change to the core app.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The core stays small: anything a coach could do without should usually be a plugin.
+        If your idea fits a plugin better, use the **Plugin idea** template instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or impossible today, and for whom (coach, staff, student)?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you'd like to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: Cost and setup impact
+      description: Does this need any AWS service with a monthly cost? (Basic must stay around US$1/month.)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
