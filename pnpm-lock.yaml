@@ -29,6 +29,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.1174.0
+        version: 3.1174.0
+      '@aws-sdk/lib-dynamodb':
+        specifier: ^3.1174.0
+        version: 3.1174.0(@aws-sdk/client-dynamodb@3.1174.0)
       '@hono/node-server':
         specifier: ^1.19.0
         version: 1.19.19(hono@4.13.19)
@@ -41,13 +47,13 @@ importers:
       '@racket-club/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      electrodb:
+        specifier: ^3.9.3
+        version: 3.9.3(@aws-sdk/client-dynamodb@3.1174.0)
       hono:
         specifier: ^4.9.0
         version: 4.13.19
     devDependencies:
-      '@aws-sdk/client-dynamodb':
-        specifier: ^3.1174.0
-        version: 3.1174.0
       '@aws-sdk/client-dynamodb-streams':
         specifier: ^3.1174.0
         version: 3.1174.0
@@ -252,6 +258,12 @@ packages:
     resolution: {integrity: sha512-8q1ICxcDjHId3bBryuu/j+1L9y5/3uQnwzLDt5j2ElcjZSoWmFtymdJy7OjLrluSMe0Z4mq5bcH4fxBXvlEHfw==}
     engines: {node: '>=20.0.0'}
 
+  '@aws-sdk/lib-dynamodb@3.1174.0':
+    resolution: {integrity: sha512-dssP7tZm6YTgZgTm/kHhg1IshPhhBzJ18dkoyziAYVcLANnr9TowrfCt7KFQpAatV/O/y1JeMC7pMqB65Rfc+A==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      '@aws-sdk/client-dynamodb': ^3.1174.0
+
   '@aws-sdk/middleware-endpoint-discovery@3.972.39':
     resolution: {integrity: sha512-AtZS+UK7CciPbdiszPoG08A23kUojFxFnWIv155uPieSPcHR9D9Sovtp19U0j5qmD2DzHpG9OI7mb0Kiyvf3mA==}
     engines: {node: '>=20.0.0'}
@@ -279,6 +291,12 @@ packages:
   '@aws-sdk/types@3.975.1':
     resolution: {integrity: sha512-7rGxUkCB2QPoQOeJmonmAICTN2zrH+fpmi1p4Iwu72lnxNaMhOgqcbpyddifnM1DBb19TWQ1u6z/XjkaFNEDWw==}
     engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/util-dynamodb@3.996.9':
+    resolution: {integrity: sha512-16x2tRvl7OYpZ0W/DdFJieFriD13+RvuRBDbe5sj/tCEfK86HSGd7I2s5j0ivz8p6KWGkS+5wKRO9OliJkjUOQ==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      '@aws-sdk/client-dynamodb': ^3.1111.0
 
   '@aws-sdk/xml-builder@3.972.43':
     resolution: {integrity: sha512-rG8QVx4DOrJWptsogu1Aq+CDsnPKaBrAlJpKLxrJrIDXAq1ElnW0yQjjBnlWSXll0cDakCG6UDvaqwz0A9d9Og==}
@@ -1772,6 +1790,9 @@ packages:
     engines: {node: '>=0.10.0'}
     hasBin: true
 
+  electrodb@3.9.3:
+    resolution: {integrity: sha512-7RGiQt1mXunlhswzLW3wEwXdlIv2x32FzifOoJfyHFiyIrvRoUmfe69xIpoiOysHN4N/RKdxFQ53FlFA2nPQDA==}
+
   electron-to-chromium@1.5.487:
     resolution: {integrity: sha512-qWotOhQYeYEj+DK4+Y+cfPj44qiC6ETIiWtJLfmDJydED2BJJ7loPA4SfBbbrMI6X/X3tryJgxnY9nxsO545Zw==}
 
@@ -2170,6 +2191,9 @@ packages:
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
     engines: {node: '>=0.10.0'}
+
+  jsonschema@1.5.0:
+    resolution: {integrity: sha512-K+A9hhqbn0f3pJX17Q/7H6yQfD/5OXgdrR5UE12gMXCiN9D5Xq2o5mddV2QEcX/bjla99ASsAAQUyMCCRWAEhw==}
 
   leven@3.1.0:
     resolution: {integrity: sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A==}
@@ -3017,6 +3041,15 @@ snapshots:
       mnemonist: 0.38.3
       tslib: 2.9.1
 
+  '@aws-sdk/lib-dynamodb@3.1174.0(@aws-sdk/client-dynamodb@3.1174.0)':
+    dependencies:
+      '@aws-sdk/client-dynamodb': 3.1174.0
+      '@aws-sdk/core': 3.981.0
+      '@aws-sdk/util-dynamodb': 3.996.9(@aws-sdk/client-dynamodb@3.1174.0)
+      '@smithy/core': 3.41.0
+      '@smithy/types': 4.20.0
+      tslib: 2.9.1
+
   '@aws-sdk/middleware-endpoint-discovery@3.972.39':
     dependencies:
       '@aws-sdk/endpoint-cache': 3.972.11
@@ -3071,6 +3104,11 @@ snapshots:
   '@aws-sdk/types@3.975.1':
     dependencies:
       '@smithy/types': 4.20.0
+      tslib: 2.9.1
+
+  '@aws-sdk/util-dynamodb@3.996.9(@aws-sdk/client-dynamodb@3.1174.0)':
+    dependencies:
+      '@aws-sdk/client-dynamodb': 3.1174.0
       tslib: 2.9.1
 
   '@aws-sdk/xml-builder@3.972.43':
@@ -4534,6 +4572,14 @@ snapshots:
     dependencies:
       jake: 10.9.4
 
+  electrodb@3.9.3(@aws-sdk/client-dynamodb@3.1174.0):
+    dependencies:
+      '@aws-sdk/lib-dynamodb': 3.1174.0(@aws-sdk/client-dynamodb@3.1174.0)
+      '@aws-sdk/util-dynamodb': 3.996.9(@aws-sdk/client-dynamodb@3.1174.0)
+      jsonschema: 1.5.0
+    transitivePeerDependencies:
+      - '@aws-sdk/client-dynamodb'
+
   electron-to-chromium@1.5.487: {}
 
   emoji-regex@8.0.0: {}
@@ -5037,6 +5083,8 @@ snapshots:
       graceful-fs: 4.2.12
 
   jsonpointer@5.0.1: {}
+
+  jsonschema@1.5.0: {}
 
   leven@3.1.0: {}
 

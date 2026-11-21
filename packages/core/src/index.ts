@@ -4,3 +4,4 @@ export * from './clock';
 export * from './events';
 export * from './invoice';
 export * from './money';
+export * from './time';

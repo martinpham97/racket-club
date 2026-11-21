@@ -6,6 +6,7 @@ import {
   CreateTableCommand,
   DynamoDBClient,
   ResourceInUseException,
+  UpdateTimeToLiveCommand,
   waitUntilTableExists,
 } from '@aws-sdk/client-dynamodb';
 import {
@@ -89,6 +90,17 @@ export async function createLocalResources() {
     { client: c.dynamodb, maxWaitTime: 30 },
     { TableName: localNames.table },
   );
+  // Idempotency claims expire through TTL. Setting it again when it's already on is an error.
+  await c.dynamodb
+    .send(
+      new UpdateTimeToLiveCommand({
+        TableName: localNames.table,
+        TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+      }),
+    )
+    .catch((err: Error) => {
+      if (!/already enabled/i.test(err.message)) throw err;
+    });
 
   await c.eventbridge
     .send(new CreateEventBusCommand({ Name: localNames.bus }))

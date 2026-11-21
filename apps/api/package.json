@@ -9,14 +9,16 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1174.0",
+    "@aws-sdk/lib-dynamodb": "^3.1174.0",
     "@hono/node-server": "^1.19.0",
     "@racket-club/core": "workspace:*",
     "@racket-club/i18n": "workspace:*",
     "@racket-club/plugin-sdk": "workspace:*",
+    "electrodb": "^3.9.3",
     "hono": "^4.9.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1174.0",
     "@aws-sdk/client-dynamodb-streams": "^3.1174.0",
     "@aws-sdk/client-eventbridge": "^3.1174.0",
     "@aws-sdk/client-s3": "^3.1174.0",

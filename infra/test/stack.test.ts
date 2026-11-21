@@ -29,6 +29,12 @@ describe('data safety', () => {
     });
   });
 
+  it('expires idempotency claims through TTL on expiresAt', () => {
+    template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+    });
+  });
+
   it('has point-in-time recovery on', () => {
     template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       Replicas: Match.arrayWith([

@@ -90,6 +90,7 @@ export class RacketClubStack extends Stack {
       billing: dynamodb.Billing.onDemand(),
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       dynamoStream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      timeToLiveAttribute: 'expiresAt', // idempotency claims expire
       removalPolicy: RemovalPolicy.RETAIN, // deleting the app never deletes student data
       globalSecondaryIndexes: [
         {
