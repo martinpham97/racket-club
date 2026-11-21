@@ -1,0 +1,76 @@
+import { App } from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { describe, expect, it } from 'vitest';
+import { RacketClubStack } from '../lib/racket-club-stack';
+
+const template = Template.fromStack(
+  new RacketClubStack(new App(), 'Test', {
+    apiCode: lambda.Code.fromInline('exports.handler = async () => ({ statusCode: 200 })'),
+  }),
+);
+
+describe('deploy form', () => {
+  it('asks for app name, coach email and setup mode', () => {
+    template.hasParameter('AppName', { Default: 'Racket Club' });
+    template.hasParameter('CoachEmail', {});
+    template.hasParameter('SetupMode', { AllowedValues: ['Basic', 'Advanced'], Default: 'Basic' });
+  });
+});
+
+describe('data safety', () => {
+  it('keeps the table and uploads when the stack is deleted', () => {
+    template.hasResource('AWS::DynamoDB::GlobalTable', { DeletionPolicy: 'Retain' });
+    template.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Retain',
+      Properties: Match.objectLike({
+        PublicAccessBlockConfiguration: Match.objectLike({ BlockPublicAcls: true }),
+      }),
+    });
+  });
+
+  it('has point-in-time recovery on', () => {
+    template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      Replicas: Match.arrayWith([
+        Match.objectLike({
+          PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+        }),
+      ]),
+    });
+  });
+});
+
+describe('auth', () => {
+  it('creates owner, staff and student groups and puts the coach in owner', () => {
+    template.resourceCountIs('AWS::Cognito::UserPoolGroup', 3);
+    template.hasResourceProperties('AWS::Cognito::UserPoolUserToGroupAttachment', {
+      GroupName: 'owner',
+    });
+  });
+
+  it('protects every API route except health, config and theme', () => {
+    const routes = template.findResources('AWS::ApiGatewayV2::Route');
+    const open = Object.values(routes)
+      .filter((r) => !(r as { Properties: { AuthorizerId?: unknown } }).Properties.AuthorizerId)
+      .map((r) => (r as { Properties: { RouteKey: string } }).Properties.RouteKey)
+      .sort();
+    expect(open).toEqual(['GET /api/config', 'GET /api/health', 'GET /api/theme.css']);
+  });
+});
+
+describe('hosting', () => {
+  it('rewrites SPA paths on the web behaviour only, never API errors', () => {
+    template.resourceCountIs('AWS::CloudFront::Function', 1);
+    const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as {
+      Properties: { DistributionConfig: { CustomErrorResponses?: unknown } };
+    };
+    expect(dist.Properties.DistributionConfig.CustomErrorResponses).toBe(undefined);
+  });
+});
+
+describe('Basic vs Advanced', () => {
+  it('only creates alarms and alert topics in Advanced', () => {
+    template.hasResource('AWS::CloudWatch::Alarm', { Condition: 'IsAdvanced' });
+    template.hasResource('AWS::SNS::Topic', { Condition: 'IsAdvanced' });
+  });
+});

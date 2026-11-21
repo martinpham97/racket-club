@@ -1,0 +1,20 @@
+{
+  "name": "@racket-club/infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy": "cdk deploy RacketClub",
+    "deploy:sandbox": "cdk deploy RacketClub-$USER --hotswap",
+    "synth:release": "cdk synth RacketClub -c release=true"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.215.0",
+    "constructs": "^10.4.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1029.0",
+    "esbuild": "^0.25.0"
+  }
+}

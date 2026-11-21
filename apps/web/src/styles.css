@@ -1,0 +1,116 @@
+/* Every value comes from theme tokens (--rc-*), so theme plugins restyle the whole app. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--rc-font-body, system-ui, sans-serif);
+  background: var(--rc-color-background, #f7f8fa);
+  color: var(--rc-color-text, #16202c);
+}
+
+h1,
+h2 {
+  font-family: var(--rc-font-heading, inherit);
+}
+
+.rc-app {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.rc-header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--rc-space-unit, 4px) * 3);
+  padding: calc(var(--rc-space-unit, 4px) * 3) calc(var(--rc-space-unit, 4px) * 4);
+  background: var(--rc-color-primary);
+  color: var(--rc-color-on-primary);
+}
+.rc-header h1 {
+  font-size: 1.25rem;
+  margin: 0;
+  flex: 1;
+}
+.rc-logo {
+  height: 32px;
+}
+
+.rc-main {
+  padding: calc(var(--rc-space-unit, 4px) * 4);
+  display: grid;
+  gap: calc(var(--rc-space-unit, 4px) * 4);
+  align-content: start;
+}
+.rc-density-compact .rc-main {
+  gap: calc(var(--rc-space-unit, 4px) * 2);
+}
+
+.rc-tagline {
+  color: var(--rc-color-text-muted);
+  margin: 0;
+}
+
+.rc-card {
+  background: var(--rc-color-surface);
+  border: 1px solid var(--rc-color-border);
+  border-radius: var(--rc-radius-card);
+  box-shadow: var(--rc-shadow-card);
+  padding: calc(var(--rc-space-unit, 4px) * 4);
+  display: grid;
+  gap: calc(var(--rc-space-unit, 4px) * 2);
+}
+.rc-card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.rc-button {
+  display: inline-block;
+  border: none;
+  border-radius: var(--rc-radius-button);
+  padding: 10px 16px;
+  background: var(--rc-color-primary);
+  color: var(--rc-color-on-primary);
+  font: inherit;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+}
+.rc-button-secondary {
+  background: transparent;
+  color: var(--rc-color-text);
+  border: 1px solid var(--rc-color-border);
+}
+
+.rc-nav {
+  display: flex;
+  justify-content: space-around;
+  border-top: 1px solid var(--rc-color-border);
+  background: var(--rc-color-surface);
+  padding: calc(var(--rc-space-unit, 4px) * 2);
+  padding-bottom: max(calc(var(--rc-space-unit, 4px) * 2), env(safe-area-inset-bottom));
+}
+.rc-nav a {
+  color: var(--rc-color-text);
+  text-decoration: none;
+  padding: 8px;
+}
+
+/* Side-menu layout comes last so it overrides the base header and nav rules. */
+.rc-nav-side-menu {
+  grid-template-columns: 200px 1fr;
+  grid-template-rows: auto 1fr;
+}
+.rc-nav-side-menu .rc-header {
+  grid-column: 1 / -1;
+}
+.rc-nav-side-menu .rc-nav {
+  grid-row: 2;
+  grid-column: 1;
+  flex-direction: column;
+  border-top: none;
+  border-right: 1px solid var(--rc-color-border);
+}

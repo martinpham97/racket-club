@@ -1,0 +1,39 @@
+{
+  "name": "racket-club",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Racket Club: a free, open-source, self-hosted booking app for badminton coaches. Serverless on AWS, extendable with plugins.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm db:up && pnpm -r --parallel --filter @racket-club/api --filter @racket-club/web dev",
+    "db:up": "docker compose up -d dynamodb",
+    "db:down": "docker compose down",
+    "seed": "pnpm --filter @racket-club/api seed",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:coverage": "vitest run --project unit --coverage",
+    "test:int": "vitest run --project integration",
+    "test:e2e": "pnpm --filter @racket-club/web test:e2e",
+    "create-plugin": "tsx tools/create-plugin/index.ts",
+    "sandbox": "pnpm --filter @racket-club/infra deploy:sandbox",
+    "deploy": "pnpm --filter @racket-club/infra deploy",
+    "synth:release": "pnpm --filter @racket-club/infra synth:release"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
