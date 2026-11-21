@@ -11,3 +11,6 @@ playwright-report/
 test-results/
 .dynamodb/
 dev-dist/
+
+# Local working notes for AI assistants; not part of the project
+memory-bank/
