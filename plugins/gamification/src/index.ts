@@ -60,6 +60,8 @@ export default definePlugin<EarningRules>({
   permissions: ['notifications:send', 'events:emit', 'users:read'],
   settings: settingsSchema,
   hooks: {
+    'booking.created': async (event, ctx) =>
+      awardFor(ctx, event, event.payload.userId, ctx.settings.bookSession, 'book'),
     'session.attended': async (event, ctx) =>
       awardFor(ctx, event, event.payload.userId, ctx.settings.attend, 'attend'),
     'payment.marked_paid': async (event, ctx) => {

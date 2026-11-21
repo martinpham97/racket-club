@@ -103,7 +103,7 @@ One TypeScript monorepo, one package manager (pnpm), one command to run everythi
 
 **The dev loop**
 
-1. `pnpm install`, then `pnpm dev`. This starts Vite, the Hono API on Node with hot reload, DynamoDB Local in Docker, and a local event bus that runs plugin handlers in-process.
+1. `pnpm install`, then `pnpm dev`. This starts Vite, the Hono API on Node with hot reload, and AWS Emulator in Docker. Inside the API process, a local event loop polls the emulator's table stream and worker queue and runs the same publisher and worker code as the Lambdas, so plugin hooks run with the same retries and dead-letter queue as in AWS.
 2. Locally, a mock sign-in page lets you pick "Coach", "Staff" or a seeded student, so you never need Google credentials to work on features.
 3. `pnpm seed` loads a demo coach, 20 students, a term of classes and some bookings.
 4. `pnpm create-plugin socials` scaffolds a new plugin with a manifest, a route, an admin page, translations and a test.
@@ -331,6 +331,7 @@ Students earn XP to level up a pixel-art avatar and coins to spend in a shop on 
 
 | Trigger (core or plugin event)                      | XP  | Coins |
 | --------------------------------------------------- | --- | ----- |
+| Book a session (`booking.created`)                  | 2   | 0     |
 | Attend a session (`session.attended`)               | 10  | 5     |
 | 4-week attendance streak                            | 25  | 15    |
 | Pay on time (`payment.marked_paid` before due date) | 5   | 5     |

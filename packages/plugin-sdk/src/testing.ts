@@ -73,5 +73,8 @@ export function memoryIdempotencyStore(): IdempotencyStore {
       seen.add(key);
       return true;
     },
+    release: async (key) => {
+      seen.delete(key);
+    },
   };
 }

@@ -1,5 +1,5 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { Clock } from '@racket-club/core';
 import type { IdempotencyStore } from '@racket-club/plugin-sdk';
 import type { Db } from './client';
@@ -12,6 +12,7 @@ const KEEP_DAYS = 7;
  * `T#<tenant>#IDEMP#<key>`. Old claims expire through the table's TTL (`expiresAt`).
  */
 export function dynamoIdempotencyStore(db: Db, tenantId: string, clock: Clock): IdempotencyStore {
+  const Key = (key: string) => ({ pk: `T#${tenantId}#IDEMP#${key}`, sk: 'IDEMP' });
   return {
     async claim(key) {
       const now = clock.now();
@@ -20,8 +21,7 @@ export function dynamoIdempotencyStore(db: Db, tenantId: string, clock: Clock): 
           new PutCommand({
             TableName: db.table,
             Item: {
-              pk: `T#${tenantId}#IDEMP#${key}`,
-              sk: 'IDEMP',
+              ...Key(key),
               claimedAt: now.toISOString(),
               expiresAt: Math.floor(now.getTime() / 1000) + KEEP_DAYS * 24 * 3600,
             },
@@ -33,6 +33,9 @@ export function dynamoIdempotencyStore(db: Db, tenantId: string, clock: Clock): 
         if (err instanceof ConditionalCheckFailedException) return false;
         throw err;
       }
+    },
+    async release(key) {
+      await db.client.send(new DeleteCommand({ TableName: db.table, Key: Key(key) }));
     },
   };
 }

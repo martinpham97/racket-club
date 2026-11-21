@@ -22,19 +22,22 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { DynamoEventSource, SqsDlq, SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
 
 export interface RacketClubStackProps extends StackProps {
-  /** Tests pass inline code to avoid bundling; real deploys bundle apps/api with esbuild. */
-  apiCode?: lambda.Code;
+  /** Tests pass inline code for every function to avoid bundling; deploys bundle apps/api. */
+  lambdaCode?: lambda.Code;
 }
 
 /**
@@ -158,26 +161,84 @@ export class RacketClubStack extends Stack {
     });
 
     // ---- API ------------------------------------------------------------------------
-    const apiFn = props.apiCode
-      ? new lambda.Function(this, 'Api', {
-          runtime: lambda.Runtime.NODEJS_22_X,
-          architecture: lambda.Architecture.ARM_64,
-          handler: 'index.handler',
-          code: props.apiCode,
-          memorySize: 512,
-          timeout: Duration.seconds(10),
-        })
-      : new NodejsFunction(this, 'Api', {
-          entry: join(repoRoot, 'apps/api/src/lambda.ts'),
-          runtime: lambda.Runtime.NODEJS_22_X,
-          architecture: lambda.Architecture.ARM_64,
-          memorySize: 512,
-          timeout: Duration.seconds(10),
-          bundling: { format: OutputFormat.ESM, minify: true, sourceMap: true },
-        });
+    const lambdaFn = (id: string, entry: string, timeout: Duration) => {
+      const common = {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        architecture: lambda.Architecture.ARM_64,
+        memorySize: 512,
+        timeout,
+      };
+      return props.lambdaCode
+        ? new lambda.Function(this, id, {
+            ...common,
+            handler: 'index.handler',
+            code: props.lambdaCode,
+          })
+        : new NodejsFunction(this, id, {
+            ...common,
+            entry: join(repoRoot, 'apps/api/src', entry),
+            bundling: {
+              format: OutputFormat.ESM,
+              minify: true,
+              sourceMap: true,
+              // Bundle the AWS SDK too: the runtime's copy is a different version from the one tested.
+              externalModules: [],
+              // CommonJS dependencies call require(), which an ES module lacks; without this the
+              // function fails on load ("Dynamic require of node:https is not supported").
+              banner:
+                "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+            },
+          });
+    };
+    const apiFn = lambdaFn('Api', 'lambda.ts', Duration.seconds(10));
     table.grantReadWriteData(apiFn);
     uploads.grantReadWrite(apiFn);
     bus.grantPutEventsTo(apiFn);
+
+    // ---- Domain events: table stream -> publisher -> bus -> rule -> queue -> worker ----------
+    // Free at this scale (Lambda reading its own stream, SQS and EventBridge free tiers).
+    const publisher = lambdaFn('Publisher', 'lambda-publisher.ts', Duration.seconds(30));
+    const streamFailures = new sqs.Queue(this, 'StreamFailures', {
+      retentionPeriod: Duration.days(14),
+      enforceSSL: true,
+    });
+    publisher.addEventSource(
+      new DynamoEventSource(table, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 100,
+        bisectBatchOnError: true,
+        retryAttempts: 10,
+        onFailure: new SqsDlq(streamFailures),
+      }),
+    );
+    bus.grantPutEventsTo(publisher);
+
+    const workerTimeout = Duration.seconds(30);
+    const deadLetters = new sqs.Queue(this, 'WorkerDeadLetters', {
+      retentionPeriod: Duration.days(14),
+      enforceSSL: true,
+    });
+    const workQueue = new sqs.Queue(this, 'WorkerQueue', {
+      // AWS recommends six times the function timeout for a queue that feeds a Lambda.
+      visibilityTimeout: Duration.seconds(workerTimeout.toSeconds() * 6),
+      deadLetterQueue: { queue: deadLetters, maxReceiveCount: 5 },
+      enforceSSL: true,
+    });
+    new events.Rule(this, 'EventsToWorker', {
+      eventBus: bus,
+      eventPattern: { source: events.Match.prefix('racket-club.') },
+      targets: [new targets.SqsQueue(workQueue)],
+    });
+    const worker = lambdaFn('Worker', 'lambda-worker.ts', workerTimeout);
+    worker.addEventSource(
+      new SqsEventSource(workQueue, { batchSize: 10, reportBatchItemFailures: true }),
+    );
+    table.grantReadWriteData(worker); // plugin stores and idempotency claims
+    bus.grantPutEventsTo(worker); // plugins emit their own events
+    for (const fn of [publisher, worker]) {
+      fn.addEnvironment('TABLE_NAME', table.tableName);
+      fn.addEnvironment('EVENT_BUS_NAME', bus.eventBusName);
+    }
 
     const httpApi = new HttpApi(this, 'HttpApi', { createDefaultStage: true });
     const integration = new HttpLambdaIntegration('ApiIntegration', apiFn);
@@ -289,6 +350,16 @@ export class RacketClubStack extends Stack {
     const cfnAlarm = errors.node.defaultChild as cloudwatch.CfnAlarm;
     cfnAlarm.cfnOptions.condition = isAdvanced;
     cfnAlarm.alarmActions = [alerts.topicArn];
+
+    const deadLettered = new cloudwatch.Alarm(this, 'EventsDeadLettered', {
+      metric: deadLetters.metricApproximateNumberOfMessagesVisible({ period: Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      alarmDescription: 'A plugin hook keeps failing: events are waiting in the dead-letter queue',
+    });
+    const cfnDeadLettered = deadLettered.node.defaultChild as cloudwatch.CfnAlarm;
+    cfnDeadLettered.cfnOptions.condition = isAdvanced;
+    cfnDeadLettered.alarmActions = [alerts.topicArn];
 
     // ---- Outputs ----------------------------------------------------------------------
     new CfnOutput(this, 'AppUrl', { value: appUrl, description: 'Open this to finish setup' });
