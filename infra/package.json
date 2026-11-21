@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "deploy": "cdk deploy RacketClub",
-    "deploy:sandbox": "cdk deploy RacketClub-$USER --hotswap",
+    "sandbox": "tsx scripts/sandbox.ts",
     "synth:release": "cdk synth RacketClub -c release=true"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "aws-cdk": "^2.1029.0",
+    "cdk-nag": "^3.1.0",
     "esbuild": "^0.25.0"
   }
 }

@@ -90,11 +90,19 @@ describe('auth', () => {
           }),
           Match.objectLike({
             Action: ['ssm:GetParameters', 'ssm:PutParameter'],
-            Resource: Match.objectLike({
-              'Fn::Join': Match.arrayWith([
-                Match.arrayWith([Match.stringLikeRegexp('/google/\\*$')]),
-              ]),
-            }),
+            // Exactly the two parameters, not a wildcard.
+            Resource: [
+              Match.objectLike({
+                'Fn::Join': Match.arrayWith([
+                  Match.arrayWith([Match.stringLikeRegexp('/google/client-id$')]),
+                ]),
+              }),
+              Match.objectLike({
+                'Fn::Join': Match.arrayWith([
+                  Match.arrayWith([Match.stringLikeRegexp('/google/client-secret$')]),
+                ]),
+              }),
+            ],
           }),
         ]),
       },

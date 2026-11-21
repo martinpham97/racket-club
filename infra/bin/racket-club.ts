@@ -1,5 +1,6 @@
-import { App, CliCredentialsStackSynthesizer } from 'aws-cdk-lib';
+import { App, Aws, CliCredentialsStackSynthesizer } from 'aws-cdk-lib';
 import { RacketClubStack } from '../lib/racket-club-stack';
+import { sandboxName, sandboxStackName } from './sandbox';
 
 const app = new App();
 const release = app.node.tryGetContext('release') === 'true';
@@ -20,7 +21,12 @@ new RacketClubStack(app, 'RacketClub', {
   description: `Racket Club ${version}: badminton class booking (https://github.com/racket-club/racket-club)`,
 });
 
-// Developer sandbox stacks: `pnpm sandbox` deploys RacketClub-<your username>.
-if (process.env.USER && !release) {
-  new RacketClubStack(app, `RacketClub-${process.env.USER}`, {});
+// Developer sandbox stacks: `pnpm sandbox` deploys RacketClub-<your name> (see sandbox.ts).
+const sandbox = sandboxName(process.env);
+if (sandbox && !release) {
+  new RacketClubStack(app, sandboxStackName(sandbox), {
+    // Cognito domain prefixes are unique per region; a sandbox must not take the one a real
+    // install in the same account would use.
+    authDomainPrefix: `rc-${sandbox}-${Aws.ACCOUNT_ID}`,
+  });
 }
