@@ -54,6 +54,23 @@ export function createEntities(client: DynamoDBDocumentClient, table: string) {
         /** The role users are listed under (gsi1); the highest of `roles`. */
         primaryRole: { type: ['owner', 'staff', 'student'] as const, required: true },
         locale: { type: ['en', 'vi'] as const, required: true, default: 'en' },
+        // Onboarding answers (core/onboarding.ts); empty until the first-sign-in form is done.
+        phone: { type: 'string' },
+        skillLevel: { type: ['beginner', 'improver', 'intermediate', 'advanced'] as const },
+        emergencyContact: {
+          type: 'map',
+          properties: { name: { type: 'string' }, phone: { type: 'string' } },
+        },
+        junior: { type: 'boolean' },
+        guardian: {
+          type: 'map',
+          properties: {
+            name: { type: 'string' },
+            phone: { type: 'string' },
+            email: { type: 'string' },
+          },
+        },
+        onboardedAt: { type: 'string' },
         createdAt: { type: 'string', required: true, readOnly: true },
       },
       indexes: {

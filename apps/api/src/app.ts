@@ -1,4 +1,4 @@
-import { resolveBranding } from '@racket-club/core';
+import { type Clock, parseOnboarding, resolveBranding, systemClock } from '@racket-club/core';
 import {
   resolveTheme,
   type ThemeDefinition,
@@ -6,15 +6,21 @@ import {
   themeStylesheet,
 } from '@racket-club/plugin-sdk';
 import { Hono, type MiddlewareHandler } from 'hono';
-import { type AuthVariables, requireRole } from './auth';
+import { type AuthUser, type AuthVariables, requireRole } from './auth';
+import { type GoogleSetup, parseGoogleClient } from './google-sign-in';
 import { type AnyPlugin, CORE_VERSION, registryFor as registryForTenant } from './plugins';
 import type { SettingsStore } from './settings-store';
+import type { UserStore } from './users';
 
 export { CORE_VERSION };
 
 export interface AppDeps {
   plugins: AnyPlugin[];
   settings: SettingsStore;
+  users: UserStore;
+  clock?: Clock;
+  /** Only in AWS: there is no Cognito locally. */
+  googleSetup?: GoogleSetup;
   auth: MiddlewareHandler<{ Variables: AuthVariables }>;
   env: Record<string, string | undefined>;
   /** Resolved from the host name later (multi-tenant ready); always 'default' for now. */
@@ -59,6 +65,8 @@ export function createApp(deps: AppDeps) {
         mode: deps.env.AUTH_MODE ?? 'cognito',
         userPoolClientId: deps.env.USER_POOL_CLIENT_ID ?? null,
         domain: deps.env.COGNITO_DOMAIN ?? null,
+        // Until the coach finishes this setup step, students sign up with email.
+        google: deps.googleSetup ? (await deps.googleSetup.status()).configured : false,
       },
     });
   });
@@ -70,7 +78,44 @@ export function createApp(deps: AppDeps) {
     return c.body(themeStylesheet(theme));
   });
 
-  app.get('/me', requireRole('owner', 'staff', 'student'), (c) => c.json(c.get('user')));
+  const clock = deps.clock ?? systemClock;
+  const signedIn = requireRole('owner', 'staff', 'student');
+  // Signed in means a token (or mock user); the record is created on first sight, which covers
+  // the coach, whose account is made at deploy time without the sign-up trigger.
+  const profileOf = async (c: { get(k: 'user'): AuthUser | null; get(k: 'tenantId'): string }) => {
+    const u = c.get('user') as AuthUser;
+    const profile = await deps.users.ensure(
+      c.get('tenantId'),
+      { userId: u.id, email: u.email, name: u.name, roles: u.roles, locale: u.locale },
+      clock.now().toISOString(),
+    );
+    return { u, profile };
+  };
+  const meView = (u: AuthUser, profile: Awaited<ReturnType<UserStore['ensure']>>) => ({
+    ...profile,
+    // Roles come from the token (Cognito groups), never from what is stored.
+    roles: u.roles,
+    // The first-sign-in form is for students; the coach and staff skip it.
+    needsOnboarding: u.roles.includes('student') && profile.onboarding === null,
+  });
+
+  app.get('/me', signedIn, async (c) => {
+    const { u, profile } = await profileOf(c);
+    return c.json(meView(u, profile));
+  });
+
+  app.put('/me/onboarding', signedIn, async (c) => {
+    const parsed = parseOnboarding(await c.req.json().catch(() => null));
+    if (parsed.kind === 'invalid') return c.json({ error: 'invalid', fields: parsed.fields }, 400);
+    const { u } = await profileOf(c);
+    const saved = await deps.users.completeOnboarding(
+      c.get('tenantId'),
+      u.id,
+      parsed.value,
+      clock.now().toISOString(),
+    );
+    return c.json(meView(u, saved));
+  });
 
   // ---- Admin: plugins -------------------------------------------------------------
   app.get('/admin/plugins', requireRole('owner'), async (c) => {
@@ -100,6 +145,32 @@ export function createApp(deps: AppDeps) {
       reg.activePlugins().map((p) => p.id),
     );
     return c.json({ active: reg.activePlugins().map((p) => p.id) });
+  });
+
+  // ---- Admin: setup wizard, Google sign-in ---------------------------------------
+  const noGoogleSetup = { error: 'google-setup-unavailable' } as const;
+
+  app.get('/admin/setup/google', requireRole('owner'), async (c) => {
+    if (!deps.googleSetup) return c.json(noGoogleSetup, 503);
+    const domain = deps.env.COGNITO_DOMAIN;
+    return c.json({
+      ...(await deps.googleSetup.status()),
+      // The exact URL the coach pastes into Google Cloud Console as an authorised redirect URI.
+      redirectUrl: domain ? `${domain}/oauth2/idpresponse` : null,
+    });
+  });
+
+  app.put('/admin/setup/google', requireRole('owner'), async (c) => {
+    if (!deps.googleSetup) return c.json(noGoogleSetup, 503);
+    const parsed = parseGoogleClient(await c.req.json().catch(() => null));
+    if (parsed.kind === 'invalid') return c.json({ error: 'invalid', fields: parsed.fields }, 400);
+    try {
+      await deps.googleSetup.configure(parsed.value);
+    } catch (err) {
+      // Cognito rejected it (e.g. a malformed client); nothing was saved.
+      return c.json({ error: 'google-setup-failed', message: (err as Error).message }, 502);
+    }
+    return c.json({ configured: true, clientId: parsed.value.clientId });
   });
 
   // ---- Admin: branding and appearance --------------------------------------------

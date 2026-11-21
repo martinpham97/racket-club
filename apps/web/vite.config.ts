@@ -31,6 +31,19 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: true, type: 'module' },
       }),
     ],
+    // Pre-bundle up front: otherwise Vite finds these during the first page load, re-bundles and
+    // reloads the page, and a test (or a developer) on a cold cache sees a blank page.
+    optimizeDeps: {
+      include: [
+        'react',
+        'react/jsx-dev-runtime',
+        'react-dom/client',
+        'i18next',
+        'i18next-icu',
+        'react-i18next',
+        'workbox-precaching',
+      ],
+    },
     server: {
       port: 5173,
       proxy: { '/api': `http://localhost:${apiPort}` },

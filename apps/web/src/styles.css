@@ -99,6 +99,49 @@ h2 {
   padding: 8px;
 }
 
+/* Forms */
+.rc-stack {
+  display: grid;
+  gap: calc(var(--rc-space-unit, 4px) * 3);
+}
+.rc-field {
+  display: grid;
+  gap: var(--rc-space-unit, 4px);
+}
+.rc-field input,
+.rc-field select {
+  font: inherit;
+  padding: calc(var(--rc-space-unit, 4px) * 2);
+  border: 1px solid var(--rc-color-border);
+  border-radius: var(--rc-radius-button);
+  background: var(--rc-color-surface);
+  color: var(--rc-color-text);
+}
+.rc-field input[aria-invalid="true"],
+.rc-field select[aria-invalid="true"] {
+  border-color: var(--rc-color-danger);
+}
+.rc-fieldset {
+  border: 1px solid var(--rc-color-border);
+  border-radius: var(--rc-radius-card);
+  padding: calc(var(--rc-space-unit, 4px) * 3);
+  display: grid;
+  gap: calc(var(--rc-space-unit, 4px) * 2);
+}
+.rc-check {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--rc-space-unit, 4px) * 2);
+}
+.rc-error {
+  color: var(--rc-color-danger);
+  margin: 0;
+}
+.rc-success {
+  color: var(--rc-color-success);
+  margin: 0;
+}
+
 /* Side-menu layout comes last so it overrides the base header and nav rules. */
 .rc-nav-side-menu {
   grid-template-columns: 200px 1fr;

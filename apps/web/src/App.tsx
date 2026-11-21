@@ -1,17 +1,49 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AppConfig } from './config';
+import { api } from './api';
+import { currentIdToken, signOut, startSignIn } from './auth/cognito';
+import type { AppConfig, Me } from './config';
+import { GoogleSetup } from './GoogleSetup';
 import { setLocale } from './i18n';
-import { MockSignIn, type MockUser } from './MockSignIn';
+import { MockSignIn } from './MockSignIn';
+import { Onboarding } from './Onboarding';
 
 /**
- * Phase 0 shell: branding, theme layout, language switch, mock sign-in and the plugin list.
- * Booking screens arrive in Phase 1. Every colour comes from --rc-* theme variables.
+ * Phase 0 shell: branding, theme layout, language switch, sign-in (mock locally, Cognito in
+ * AWS), first-sign-in onboarding and the coach's Google sign-in setup. Booking screens arrive in
+ * Phase 1. Every colour comes from --rc-* theme variables.
  */
-export function App({ config }: { config: AppConfig }) {
+export function App({ config, signInError }: { config: AppConfig; signInError?: boolean }) {
   const { t, i18n } = useTranslation();
-  const [user, setUser] = useState<MockUser | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [checking, setChecking] = useState(true);
   const lang = (i18n.language === 'vi' ? 'vi' : 'en') as 'en' | 'vi';
+
+  const loadMe = useCallback(async () => {
+    try {
+      setMe(await api<Me>('/me'));
+    } catch {
+      setMe(null);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const signedIn =
+      config.auth.mode === 'mock'
+        ? Promise.resolve(sessionStorage.getItem('rc.mockUser') !== null)
+        : currentIdToken(config).then((token) => token !== null);
+    void signedIn.then((yes) => (yes ? loadMe() : setChecking(false)));
+  }, [config, loadMe]);
+
+  const leave = () => {
+    if (config.auth.mode === 'cognito') return signOut(config);
+    sessionStorage.removeItem('rc.mockUser');
+    setMe(null);
+  };
+
+  const signedOut = !checking && !me;
 
   return (
     <div
@@ -34,26 +66,49 @@ export function App({ config }: { config: AppConfig }) {
 
       <main className="rc-main">
         <p className="rc-tagline">{t('app.tagline')}</p>
+        {signInError && <p className="rc-error">{t('auth.signInFailed')}</p>}
 
-        {config.auth.mode === 'mock' && !user && <MockSignIn onSignIn={setUser} />}
-        {config.auth.mode === 'cognito' && !user && (
-          <a className="rc-button" href="/auth/sign-in">
-            {t('auth.continueWithGoogle')}
-          </a>
-        )}
-        {user && (
-          <section className="rc-card">
-            <p>
-              {user.email} ({user.roles.join(', ')})
-            </p>
-            <button type="button" className="rc-button" onClick={() => setUser(null)}>
-              {t('auth.signOut')}
+        {signedOut && config.auth.mode === 'mock' && <MockSignIn onSignIn={() => void loadMe()} />}
+        {signedOut && config.auth.mode === 'cognito' && (
+          <section className="rc-card rc-stack">
+            {config.auth.google && (
+              <button
+                type="button"
+                className="rc-button"
+                onClick={() => void startSignIn(config, 'Google')}
+              >
+                {t('auth.continueWithGoogle')}
+              </button>
+            )}
+            <button
+              type="button"
+              className={config.auth.google ? 'rc-button rc-button-secondary' : 'rc-button'}
+              onClick={() => void startSignIn(config)}
+            >
+              {t('auth.signInWithEmail')}
             </button>
           </section>
         )}
 
+        {me?.needsOnboarding && <Onboarding me={me} onDone={setMe} />}
+
+        {me && !me.needsOnboarding && (
+          <>
+            <section className="rc-card">
+              <h2>{t('home.welcome', { name: me.name })}</h2>
+              <p>
+                {me.email} ({me.roles.join(', ')})
+              </p>
+              <button type="button" className="rc-button rc-button-secondary" onClick={leave}>
+                {t('auth.signOut')}
+              </button>
+            </section>
+            {me.roles.includes('owner') && <GoogleSetup />}
+          </>
+        )}
+
         <section className="rc-card">
-          <h2>Plugins</h2>
+          <h2>{t('plugins.title')}</h2>
           <ul>
             {config.plugins.map((p) => (
               <li key={p.id}>{p.name[lang]}</li>
@@ -62,7 +117,7 @@ export function App({ config }: { config: AppConfig }) {
         </section>
       </main>
 
-      <nav className="rc-nav" aria-label="Main">
+      <nav className="rc-nav" aria-label={t('nav.main')}>
         <a href="/">{t('nav.home')}</a>
         <a href="/sessions">{t('nav.sessions')}</a>
         <a href="/inbox">{t('nav.inbox')}</a>

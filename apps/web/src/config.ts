@@ -11,7 +11,23 @@ export interface AppConfig {
   };
   locales: Array<'en' | 'vi'>;
   plugins: Array<{ id: string; name: { en: string; vi: string } }>;
-  auth: { mode: 'mock' | 'cognito'; userPoolClientId: string | null; domain: string | null };
+  auth: {
+    mode: 'mock' | 'cognito';
+    userPoolClientId: string | null;
+    domain: string | null;
+    /** True once the coach has finished the "Google sign-in" setup step. */
+    google: boolean;
+  };
+}
+
+/** The signed-in person, from /api/me. */
+export interface Me {
+  userId: string;
+  email: string;
+  name: string;
+  roles: Array<'owner' | 'staff' | 'student'>;
+  locale: 'en' | 'vi';
+  needsOnboarding: boolean;
 }
 
 export async function loadConfig(): Promise<AppConfig> {

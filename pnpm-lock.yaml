@@ -29,6 +29,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@aws-sdk/client-cognito-identity-provider':
+        specifier: ^3.1175.0
+        version: 3.1175.0
       '@aws-sdk/client-dynamodb':
         specifier: ^3.1175.0
         version: 3.1175.0
@@ -39,6 +42,9 @@ importers:
         specifier: ^3.1175.0
         version: 3.1175.0
       '@aws-sdk/client-sqs':
+        specifier: ^3.1175.0
+        version: 3.1175.0
+      '@aws-sdk/client-ssm':
         specifier: ^3.1175.0
         version: 3.1175.0
       '@aws-sdk/lib-dynamodb':
@@ -200,6 +206,10 @@ packages:
     resolution: {integrity: sha512-OgxgE64MkHNGtt7YJc2Q+d1maGnYcEkCw5r+UO7cM78iVzyMhXFVMgm5un1FZzk4XB8lv436zYduIWLH9ibdBg==}
     engines: {node: '>=20.0.0'}
 
+  '@aws-sdk/client-cognito-identity-provider@3.1175.0':
+    resolution: {integrity: sha512-Y7pj2Eam+gXNYqC31CpJYjsZYUwGzrYtBMEHwD2abwkP+b7z5G7XUTWPZCGTwZJ2T0EUeYaqqzN6R4cZ6143sA==}
+    engines: {node: '>=20.0.0'}
+
   '@aws-sdk/client-dynamodb-streams@3.1175.0':
     resolution: {integrity: sha512-GXD1WI1qK+lBwmbKURNqm+iHbdaGHvcOkEZxtwM1FuqEeYSl3GzUYVkSkKPyarFQlwLSQW3IWVZluOn4Qg5Aag==}
     engines: {node: '>=20.0.0'}
@@ -218,6 +228,10 @@ packages:
 
   '@aws-sdk/client-sqs@3.1175.0':
     resolution: {integrity: sha512-Yh5+5HcVlN5ae2UkTdru5T4ObdiFHP3qwg6s2F3ZP/vW5MxtCHP1BWQH8wPZeKTCgi9XmUtBo25HjhPqnkdylw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-ssm@3.1175.0':
+    resolution: {integrity: sha512-Yb9h6zfKKwPMrhL/Kyn47rNaeMpBdF8/0Dshys1Cpl14rH2GMQ01o0C+brvpumXXBAxIq6sdKEs/UhKQ67+pyA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.981.1':
@@ -3041,6 +3055,17 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
+  '@aws-sdk/client-cognito-identity-provider@3.1175.0':
+    dependencies:
+      '@aws-sdk/core': 3.981.1
+      '@aws-sdk/credential-provider-node': 3.972.98
+      '@aws-sdk/types': 3.975.1
+      '@smithy/core': 3.41.0
+      '@smithy/fetch-http-handler': 5.8.1
+      '@smithy/node-http-handler': 4.14.2
+      '@smithy/types': 4.20.0
+      tslib: 2.9.1
+
   '@aws-sdk/client-dynamodb-streams@3.1175.0':
     dependencies:
       '@aws-sdk/core': 3.981.1
@@ -3096,6 +3121,17 @@ snapshots:
       '@aws-sdk/core': 3.981.1
       '@aws-sdk/credential-provider-node': 3.972.98
       '@aws-sdk/middleware-sdk-sqs': 3.972.50
+      '@aws-sdk/types': 3.975.1
+      '@smithy/core': 3.41.0
+      '@smithy/fetch-http-handler': 5.8.1
+      '@smithy/node-http-handler': 4.14.2
+      '@smithy/types': 4.20.0
+      tslib: 2.9.1
+
+  '@aws-sdk/client-ssm@3.1175.0':
+    dependencies:
+      '@aws-sdk/core': 3.981.1
+      '@aws-sdk/credential-provider-node': 3.972.98
       '@aws-sdk/types': 3.975.1
       '@smithy/core': 3.41.0
       '@smithy/fetch-http-handler': 5.8.1
