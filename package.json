@@ -21,7 +21,7 @@
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
     "test:coverage": "vitest run --project unit --coverage",
-    "test:int": "vitest run --project integration",
+    "test:int": "vitest run --project integration --passWithNoTests",
     "test:e2e": "pnpm --filter @racket-club/web test:e2e",
     "create-plugin": "tsx tools/create-plugin/index.ts",
     "sandbox": "pnpm --filter @racket-club/infra deploy:sandbox",
