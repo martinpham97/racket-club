@@ -9,9 +9,9 @@ When the design and this file disagree, ask before choosing.
 
 ```bash
 pnpm install
-pnpm dev            # web (5173) + API (8787, mock auth) + DynamoDB Local (Docker)
+pnpm dev            # web (5173) + API (8787, mock auth) + AWS Emulator (Docker)
 pnpm test           # unit tests: must pass, coverage thresholds enforced
-pnpm test:int       # integration tests (needs `pnpm db:up`)
+pnpm test:int       # integration tests (needs `pnpm aws:up`; see docs/testing.md)
 pnpm test:e2e       # Playwright
 pnpm typecheck && pnpm lint
 pnpm create-plugin <id> [--theme]

@@ -20,19 +20,19 @@ The Basic setup costs about US$1 a month for 100 students.
 
 ## For developers
 
-Requirements: Node.js 22+, pnpm 10+, Docker (for DynamoDB Local).
+Requirements: Node.js 22+, pnpm 10+, Docker (for AWS Emulator, see `docs/testing.md`).
 
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev          # web app + API with hot reload + DynamoDB Local + mock sign-in
+pnpm dev          # web app + API with hot reload + AWS Emulator + mock sign-in
 pnpm seed         # demo coach, 20 students, a term of classes
 ```
 
 | Command                   | What it does                                            |
 | ------------------------- | ------------------------------------------------------- |
 | `pnpm test`               | Unit tests (required to pass, with coverage thresholds) |
-| `pnpm test:int`           | Integration tests against DynamoDB Local                |
+| `pnpm test:int`           | Integration tests against AWS Emulator                  |
 | `pnpm test:e2e`           | Playwright end-to-end tests                             |
 | `pnpm lint`               | Biome lint and format check                             |
 | `pnpm create-plugin <id>` | Scaffold a new plugin with tests                        |

@@ -14,5 +14,12 @@
     "@racket-club/i18n": "workspace:*",
     "@racket-club/plugin-sdk": "workspace:*",
     "hono": "^4.9.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1174.0",
+    "@aws-sdk/client-dynamodb-streams": "^3.1174.0",
+    "@aws-sdk/client-eventbridge": "^3.1174.0",
+    "@aws-sdk/client-s3": "^3.1174.0",
+    "@aws-sdk/client-sqs": "^3.1174.0"
   }
 }
