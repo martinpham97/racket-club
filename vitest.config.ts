@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 // Two projects:
 // - unit: fast, no Docker, required on every PR (coverage thresholds enforced)
-// - integration: needs DynamoDB Local (`pnpm db:up`), files named *.int.test.ts
+// - integration: runs against AWS Emulator (`pnpm aws:up`), files named *.int.test.ts
 export default defineConfig({
   test: {
     projects: [
@@ -20,6 +20,8 @@ export default defineConfig({
           include: ['{apps,packages,plugins}/**/*.int.test.ts'],
           environment: 'node',
           testTimeout: 30_000,
+          // Creates the table, bus, queues and bucket once; refuses any non-local endpoint.
+          globalSetup: ['apps/api/src/testing/int-global-setup.ts'],
         },
       },
     ],

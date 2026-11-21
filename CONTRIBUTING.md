@@ -11,7 +11,7 @@ Requirements: Node.js 22+, pnpm 10+ (`corepack enable` installs the pinned versi
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev            # web on :5173, API on :8787 (mock sign-in), DynamoDB Local in Docker
+pnpm dev            # web on :5173, API on :8787 (mock sign-in), AWS Emulator in Docker
 ```
 
 Open http://localhost:5173 and pick a mock user to sign in. If port 8787 is taken, set
@@ -23,7 +23,7 @@ Open http://localhost:5173 and pick a mock user to sign in. If port 8787 is take
 | `pnpm typecheck`          | TypeScript across the workspace                              |
 | `pnpm test`               | Unit tests                                                   |
 | `pnpm test:coverage`      | Unit tests with coverage thresholds (what CI runs)           |
-| `pnpm test:int`           | Integration tests (run `pnpm db:up` first)                   |
+| `pnpm test:int`           | Integration tests against AWS Emulator (`pnpm aws:up` first) |
 | `pnpm test:e2e`           | Playwright end-to-end tests (see below for the first run)    |
 | `pnpm create-plugin <id>` | Scaffold a plugin with translations and tests                |
 

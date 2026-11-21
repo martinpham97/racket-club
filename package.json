@@ -10,7 +10,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm db:up && pnpm -r --parallel --filter @racket-club/api --filter @racket-club/web dev",
+    "dev": "pnpm aws:up && pnpm aws:env -- pnpm -r --parallel --filter @racket-club/api --filter @racket-club/web dev",
+    "aws:up": "tsx tools/aws-emulator/index.ts up",
+    "aws:down": "tsx tools/aws-emulator/index.ts down",
+    "aws:env": "tsx tools/aws-emulator/index.ts env",
     "db:up": "docker compose up -d dynamodb",
     "db:down": "docker compose down",
     "seed": "pnpm --filter @racket-club/api seed",
@@ -21,7 +24,7 @@
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
     "test:coverage": "vitest run --project unit --coverage",
-    "test:int": "vitest run --project integration --passWithNoTests",
+    "test:int": "pnpm aws:env -- vitest run --project integration",
     "test:e2e": "pnpm --filter @racket-club/web test:e2e",
     "create-plugin": "tsx tools/create-plugin/index.ts",
     "sandbox": "pnpm --filter @racket-club/infra deploy:sandbox",
