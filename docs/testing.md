@@ -97,6 +97,15 @@ the runtime's SDK version rather than the tested one.
 and loads every Lambda bundle in Node, checking each exports `handler`. Removing the banner makes
 it fail on all five bundles with exactly that error.
 
+### Release template
+
+`pnpm --filter @racket-club/infra check:release` (in CI's `check` job, and in the release
+workflow on a `v*.*.*` tag) synthesizes the Launch Stack template with `-c release=true` and
+fails if it needs `cdk bootstrap`, if any Lambda bundle or layer isn't in
+`racket-club-releases-${AWS::Region}` under `v<version>/`, if the web app is missing (build
+`apps/web` first), or if any bundle fails to load. A coach's new account has no bootstrap, so
+this is what makes one-click deploys possible.
+
 ### cdk-nag
 
 `infra/test/nag.test.ts` runs cdk-nag's AWS Solutions rules on the stack and fails on any finding

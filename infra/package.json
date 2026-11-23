@@ -8,7 +8,8 @@
     "deploy": "cdk deploy RacketClub",
     "sandbox": "tsx scripts/sandbox.ts",
     "check:bundles": "cdk synth RacketClub --quiet && tsx scripts/check-bundles.ts RacketClub",
-    "synth:release": "cdk synth RacketClub -c release=true"
+    "synth:release": "cdk synth RacketClub -c release=true",
+    "check:release": "cdk synth RacketClub -c release=true --quiet && tsx scripts/check-release.ts && tsx scripts/check-bundles.ts RacketClub"
   },
   "dependencies": {
     "aws-cdk-lib": "^2.215.0",

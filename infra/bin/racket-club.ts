@@ -1,5 +1,6 @@
 import { App, Aws, CliCredentialsStackSynthesizer } from 'aws-cdk-lib';
 import { RacketClubStack } from '../lib/racket-club-stack';
+import { ReleaseStack } from '../lib/release-stack';
 import { sandboxName, sandboxStackName } from './sandbox';
 
 const app = new App();
@@ -18,7 +19,7 @@ const synthesizer = release
 
 new RacketClubStack(app, 'RacketClub', {
   synthesizer,
-  description: `Racket Club ${version}: badminton class booking (https://github.com/racket-club/racket-club)`,
+  description: `Racket Club ${version}: badminton class booking (https://github.com/martinpham97/racket-club)`,
 });
 
 // Developer sandbox stacks: `pnpm sandbox` deploys RacketClub-<your name> (see sandbox.ts).
@@ -30,3 +31,7 @@ if (sandbox && !release) {
     authDomainPrefix: `rc-${sandbox}-${Aws.ACCOUNT_ID}`,
   });
 }
+
+// The public release bucket and publishing role (one per release region), in the project's
+// AWS account: `cdk deploy RacketClubReleases`.
+new ReleaseStack(app, 'RacketClubReleases', { repo: 'martinpham97/racket-club' });
