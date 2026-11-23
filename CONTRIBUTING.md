@@ -15,8 +15,7 @@ pnpm dev            # web on :5173, API on :8787 (mock sign-in), AWS Emulator in
 ```
 
 Open http://localhost:5173 and pick a mock user to sign in. If port 8787 is taken, set
-`API_PORT` in `.env`; the API, the Vite proxy and Playwright all follow it. If port 8000 is
-taken (another DynamoDB Local, say), set `DYNAMODB_PORT` and `DYNAMODB_ENDPOINT` in `.env`.
+`API_PORT` in `.env`; the API, the Vite proxy and Playwright all follow it.
 
 | Command                   | What it does                                                 |
 | ------------------------- | ------------------------------------------------------------ |

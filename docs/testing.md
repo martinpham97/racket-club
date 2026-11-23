@@ -120,8 +120,3 @@ sandbox test that covers that path instead. Don't mock around it.
 
 | Operation | Emulator version | Covered instead by |
 | --------- | ---------------- | ------------------ |
-
-## DynamoDB Local (fallback)
-
-`docker-compose.yml` still has DynamoDB Local (`pnpm db:up`, port from `DYNAMODB_PORT`) until
-every integration test passes on the emulator. Nothing uses it by default.

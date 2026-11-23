@@ -14,8 +14,6 @@
     "aws:up": "tsx tools/aws-emulator/index.ts up",
     "aws:down": "tsx tools/aws-emulator/index.ts down",
     "aws:env": "tsx tools/aws-emulator/index.ts env",
-    "db:up": "docker compose up -d dynamodb",
-    "db:down": "docker compose down",
     "seed": "pnpm aws:up && pnpm aws:env -- pnpm --filter @racket-club/api seed",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
