@@ -1,0 +1,36 @@
+name: Release
+
+# Builds the Launch Stack template for a version tag (v1.2.3) and checks it deploys without
+# `cdk bootstrap`. Publishing to the release bucket and the GitHub release come next (task 0.7).
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint && pnpm typecheck && pnpm test
+      - name: Build the web app (the template includes it)
+        run: pnpm --filter @racket-club/web build
+      - name: Synthesize and check the release template
+        working-directory: infra
+        run: |
+          export RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          pnpm check:release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: racket-club-${{ github.ref_name }}
+          path: |
+            infra/cdk.out/RacketClub.template.json
+            infra/cdk.out/RacketClub.assets.json
+            infra/cdk.out/asset.*

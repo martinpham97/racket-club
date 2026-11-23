@@ -20,8 +20,11 @@ jobs:
       - run: pnpm typecheck
       # Unit tests are required; coverage thresholds are enforced in vitest.config.ts.
       - run: pnpm test:coverage
-      # Synthesizes the stack and loads every Lambda bundle: catches bundles that build but crash on load.
-      - run: pnpm --filter @racket-club/infra check:bundles
+      # The Launch Stack template, as a release builds it: no bootstrap needed, every bundle from the
+      # release bucket, the web app included, and every Lambda bundle loads (some build fine and
+      # still crash on load).
+      - run: pnpm --filter @racket-club/web build
+      - run: pnpm --filter @racket-club/infra check:release
 
   integration:
     runs-on: ubuntu-latest
