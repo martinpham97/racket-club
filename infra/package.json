@@ -7,6 +7,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "deploy": "cdk deploy RacketClub",
     "sandbox": "tsx scripts/sandbox.ts",
+    "check:bundles": "cdk synth RacketClub --quiet && tsx scripts/check-bundles.ts RacketClub",
     "synth:release": "cdk synth RacketClub -c release=true"
   },
   "dependencies": {

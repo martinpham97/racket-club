@@ -91,9 +91,20 @@ AWS. `pnpm seed` with `pnpm dev` running gives every seeded booking its gamifica
 `cdk synth` bundles each function as an ES module with the AWS SDK included, and a banner that
 defines `require` for the CommonJS dependencies. Without the banner every function failed on
 load (`Dynamic require of "node:https" is not supported`); without bundling the SDK they ran on
-the runtime's SDK version rather than the tested one. The publisher, worker and API bundles were
-each loaded in Node, and the worker bundle was invoked against the emulator. A test that loads
-the bundles belongs with the sandbox work (task 0.6).
+the runtime's SDK version rather than the tested one.
+
+`pnpm --filter @racket-club/infra check:bundles` (also in CI's `check` job) synthesizes the stack
+and loads every Lambda bundle in Node, checking each exports `handler`. Removing the banner makes
+it fail on all five bundles with exactly that error.
+
+### cdk-nag
+
+`infra/test/nag.test.ts` runs cdk-nag's AWS Solutions rules on the stack and fails on any finding
+that is neither fixed nor acknowledged. Acknowledgements live next to the resources at the end of
+`infra/lib/racket-club-stack.ts`, each with its reason: mostly things that cost money every month
+(WAF, access logs, Cognito Plus) and so belong behind `SetupMode=Advanced`, the three public
+routes, standard CDK grants, and functions CDK itself creates. cdk-nag v3 acknowledges through
+CDK's `Validations.of(construct).acknowledge()`; for IAM4/IAM5 use the granular ids it prints.
 
 **Not proven here:** real DynamoDB cancels concurrent transactions on one item with
 `TransactionConflict`; `bookSeat` retries those with backoff. Whether the emulator produces that
