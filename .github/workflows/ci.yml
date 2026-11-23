@@ -20,6 +20,8 @@ jobs:
       - run: pnpm typecheck
       # Unit tests are required; coverage thresholds are enforced in vitest.config.ts.
       - run: pnpm test:coverage
+      # Synthesizes the stack and loads every Lambda bundle: catches bundles that build but crash on load.
+      - run: pnpm --filter @racket-club/infra check:bundles
 
   integration:
     runs-on: ubuntu-latest

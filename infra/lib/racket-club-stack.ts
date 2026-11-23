@@ -13,6 +13,7 @@ import {
   RemovalPolicy,
   Stack,
   type StackProps,
+  Validations,
 } from 'aws-cdk-lib';
 import { HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
@@ -33,7 +34,7 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as cr from 'aws-cdk-lib/custom-resources';
-import type { Construct } from 'constructs';
+import type { Construct, IConstruct } from 'constructs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -41,6 +42,8 @@ const repoRoot = join(here, '..', '..');
 export interface RacketClubStackProps extends StackProps {
   /** Tests pass inline code for every function to avoid bundling; deploys bundle apps/api. */
   lambdaCode?: lambda.Code;
+  /** Cognito managed login domain prefix; default `rc-<account>-<region>` (one per install). */
+  authDomainPrefix?: string;
 }
 
 /**
@@ -126,6 +129,13 @@ export class RacketClubStack extends Stack {
       featurePlan: cognito.FeaturePlan.ESSENTIALS,
       selfSignUpEnabled: true, // email sign-up is the fallback until Google is configured
       signInAliases: { email: true },
+      passwordPolicy: {
+        minLength: 12,
+        requireLowercase: true,
+        requireUppercase: true,
+        requireDigits: true,
+        requireSymbols: true,
+      },
       autoVerify: { email: true },
       // Required, because managed login only offers MFA setup when it is: the coach and staff
       // must use it (docs/design.md). It applies to password accounts only; Cognito doesn't
@@ -169,7 +179,7 @@ export class RacketClubStack extends Stack {
     // ---- API ------------------------------------------------------------------------
     const lambdaFn = (id: string, entry: string, timeout: Duration) => {
       const common = {
-        runtime: lambda.Runtime.NODEJS_22_X,
+        runtime: lambda.Runtime.NODEJS_24_X,
         architecture: lambda.Architecture.ARM_64,
         memorySize: 512,
         timeout,
@@ -292,7 +302,9 @@ export class RacketClubStack extends Stack {
       },
     });
     const domain = userPool.addDomain('Domain', {
-      cognitoDomain: { domainPrefix: `rc-${Aws.ACCOUNT_ID}-${Aws.REGION}` },
+      cognitoDomain: {
+        domainPrefix: props.authDomainPrefix ?? `rc-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
+      },
       managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
     // The newer managed login shows "login pages unavailable" for a client without branding.
@@ -323,11 +335,14 @@ export class RacketClubStack extends Stack {
 
     // ---- Setup wizard, Google sign-in (apps/api/src/google-sign-in.ts) -------------------
     const ssmPrefix = `/racket-club/${this.stackName}`;
-    const googleParameters = this.formatArn({
-      service: 'ssm',
-      resource: 'parameter',
-      resourceName: `racket-club/${this.stackName}/google/*`,
-    });
+    // Exactly the two parameters google-sign-in.ts reads and writes.
+    const googleParameters = ['client-id', 'client-secret'].map((name) =>
+      this.formatArn({
+        service: 'ssm',
+        resource: 'parameter',
+        resourceName: `racket-club/${this.stackName}/google/${name}`,
+      }),
+    );
     const configureGoogle = new iam.PolicyStatement({
       actions: [
         'cognito-idp:DescribeIdentityProvider',
@@ -353,12 +368,13 @@ export class RacketClubStack extends Stack {
     for (const [k, v] of Object.entries(googleEnv)) reapplyGoogle.addEnvironment(k, v);
     reapplyGoogle.addToRolePolicy(configureGoogle);
     reapplyGoogle.addToRolePolicy(
-      new iam.PolicyStatement({ actions: ['ssm:GetParameters'], resources: [googleParameters] }),
+      new iam.PolicyStatement({ actions: ['ssm:GetParameters'], resources: googleParameters }),
     );
+    const reapplyProvider = new cr.Provider(this, 'ReapplyGoogleProvider', {
+      onEventHandler: reapplyGoogle,
+    });
     const reapply = new CustomResource(this, 'ReapplyGoogleSignIn', {
-      serviceToken: new cr.Provider(this, 'ReapplyGoogleProvider', {
-        onEventHandler: reapplyGoogle,
-      }).serviceToken,
+      serviceToken: reapplyProvider.serviceToken,
       // Changes on every synth, so it runs on every deploy (the handler is idempotent).
       properties: { DeployedAt: new Date().toISOString() },
     });
@@ -370,8 +386,9 @@ export class RacketClubStack extends Stack {
       { jwtAudience: [client.userPoolClientId] },
     );
     // Public routes (no sign-in): health, config, theme
+    const publicRoutes: IConstruct[] = [];
     for (const path of ['/api/health', '/api/config', '/api/theme.css']) {
-      httpApi.addRoutes({ path, methods: [HttpMethod.GET], integration });
+      publicRoutes.push(...httpApi.addRoutes({ path, methods: [HttpMethod.GET], integration }));
     }
     // Everything else requires a valid Cognito token; roles are checked in the app.
     httpApi.addRoutes({
@@ -393,7 +410,7 @@ export class RacketClubStack extends Stack {
     apiFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameters', 'ssm:PutParameter'],
-        resources: [googleParameters],
+        resources: googleParameters,
       }),
     );
 
@@ -408,8 +425,12 @@ export class RacketClubStack extends Stack {
     }
 
     // ---- Advanced: monitoring and alerts -------------------------------------------
-    const alerts = new sns.Topic(this, 'Alerts');
+    const alerts = new sns.Topic(this, 'Alerts', { enforceSSL: true });
     (alerts.node.defaultChild as CfnResource).cfnOptions.condition = isAdvanced;
+    // enforceSSL adds a topic policy; without the same condition a Basic deploy would fail on
+    // a policy pointing at a topic that doesn't exist.
+    (alerts.node.findChild('Policy').node.defaultChild as CfnResource).cfnOptions.condition =
+      isAdvanced;
     const subscription = new sns.CfnSubscription(this, 'AlertsEmail', {
       topicArn: alerts.topicArn,
       protocol: 'email',
@@ -442,6 +463,122 @@ export class RacketClubStack extends Stack {
     const cfnDeadLettered = deadLettered.node.defaultChild as cloudwatch.CfnAlarm;
     cfnDeadLettered.cfnOptions.condition = isAdvanced;
     cfnDeadLettered.alarmActions = [alerts.topicArn];
+
+    // ---- cdk-nag (AwsSolutions): findings we keep on purpose, each with its reason --------
+    // infra/test/nag.test.ts fails on any finding not acknowledged here.
+    const ack = (scope: IConstruct | undefined, ...rules: Array<[string, string]>) => {
+      if (!scope) return;
+      Validations.of(scope).acknowledge(
+        ...rules.map(([rule, reason]) => ({ id: `AwsSolutions::AwsSolutions-${rule}`, reason })),
+      );
+    };
+    const basicCost =
+      'Costs money every month; the Basic setup must stay around US$1/month (CLAUDE.md). ' +
+      'Belongs behind SetupMode=Advanced.';
+    ack(uploads, ['S1', `Server access logs need a separate log bucket. ${basicCost}`]);
+    ack(web, ['S1', `Server access logs need a separate log bucket. ${basicCost}`]);
+    ack(userPool, [
+      'COG8',
+      `The Plus feature plan is charged per monthly active user. ${basicCost} Essentials already gives managed login and MFA.`,
+    ]);
+    ack(
+      distribution,
+      ['CFR1', 'Students and coaches can be anywhere (travel, overseas tournaments).'],
+      ['CFR2', `AWS WAF has a monthly charge per web ACL. ${basicCost}`],
+      ['CFR3', `CloudFront access logs need a log bucket. ${basicCost}`],
+      [
+        'CFR4',
+        'Uses the default *.cloudfront.net certificate, whose TLS policy CloudFront sets; a minimum TLS version needs a custom domain and certificate (later, in the setup wizard).',
+      ],
+    );
+    ack(httpApi, ['APIG1', `API access logs go to CloudWatch Logs. ${basicCost}`]);
+    for (const route of publicRoutes) {
+      ack(route, [
+        'APIG4',
+        'Public by design: health, the app config and the theme load before sign-in. Every other route has the Cognito JWT authorizer.',
+      ]);
+    }
+    ack(streamFailures, [
+      'SQS3',
+      'This queue is itself the failure destination for stream batches the publisher could not handle.',
+    ]);
+    const basicExecution =
+      'IAM4[Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]';
+    const ourFunctions = [apiFn, publisher, worker, postConfirmation, reapplyGoogle];
+    for (const fn of ourFunctions) {
+      ack(
+        fn,
+        [
+          basicExecution,
+          'AWSLambdaBasicExecutionRole only lets the function write its own CloudWatch logs.',
+        ],
+        [
+          'L1',
+          'Node.js 24, the current LTS. Node.js 26 is newer; move once a sandbox deploy has run it on Lambda.',
+        ],
+      );
+    }
+    for (const fn of [apiFn, worker, postConfirmation]) {
+      ack(fn, [
+        'IAM5[Resource::<TableCD117FA1.Arn>/index/*]',
+        "The table's grant includes its two GSIs (gsi1, gsi2) under index/*, which queries use.",
+      ]);
+    }
+    ack(
+      apiFn,
+      ...[
+        'Action::s3:GetObject*',
+        'Action::s3:GetBucket*',
+        'Action::s3:List*',
+        'Action::s3:DeleteObject*',
+        'Action::s3:Abort*',
+        'Resource::<Uploads4F6EB0FD.Arn>/*',
+      ].map(
+        (f) =>
+          [
+            `IAM5[${f}]`,
+            "uploads.grantReadWrite: object read/write on this stack's uploads bucket only (avatars, plugin assets).",
+          ] as [string, string],
+      ),
+    );
+    ack(postConfirmation, [
+      'IAM5[Resource::arn:<AWS::Partition>:cognito-idp:<AWS::Region>:<AWS::AccountId>:userpool/*]',
+      'Only cognito-idp:AdminAddUserToGroup. The pool ARN cannot be referenced: the pool depends on this function (its trigger), which would be a dependency cycle.',
+    ]);
+    // Functions CDK itself creates and manages: the custom resource framework and, when the
+    // web app is built, BucketDeployment. CDK picks their runtime and writes their policies.
+    // (Granular ids: a bare `IAM5` doesn't cover granular findings in this cdk-nag version.)
+    const byCdk = 'Created and managed by CDK, not by this stack.';
+    ack(
+      reapplyProvider.node.tryFindChild('framework-onEvent'),
+      ['L1', byCdk],
+      [basicExecution, byCdk],
+      [
+        'IAM5[Resource::<ReapplyGoogle81184894.Arn>:*]',
+        `${byCdk} Invokes our handler, any version.`,
+      ],
+    );
+    ack(
+      this.node.children.find((c) => c.node.id.startsWith('Custom::CDKBucketDeployment')),
+      ['L1', byCdk],
+      [basicExecution, byCdk],
+      ...[
+        'Action::s3:GetObject*',
+        'Action::s3:GetBucket*',
+        'Action::s3:List*',
+        'Action::s3:DeleteObject*',
+        'Action::s3:Abort*',
+        'Resource::*',
+        'Resource::<Web3C8945DB.Arn>/*',
+        'Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-<AWS::AccountId>-<AWS::Region>/*',
+      ].map(
+        (f) =>
+          [
+            `IAM5[${f}]`,
+            `${byCdk} Copies the built web app from the CDK assets bucket into the web bucket.`,
+          ] as [string, string],
+      ),
+    );
 
     // ---- Outputs ----------------------------------------------------------------------
     new CfnOutput(this, 'AppUrl', { value: appUrl, description: 'Open this to finish setup' });

@@ -25,7 +25,7 @@
     "test:int": "pnpm aws:env -- vitest run --project integration",
     "test:e2e": "pnpm --filter @racket-club/web test:e2e",
     "create-plugin": "tsx tools/create-plugin/index.ts",
-    "sandbox": "pnpm --filter @racket-club/infra deploy:sandbox",
+    "sandbox": "pnpm --filter @racket-club/infra sandbox",
     "deploy": "pnpm --filter @racket-club/infra deploy",
     "synth:release": "pnpm --filter @racket-club/infra synth:release"
   },
